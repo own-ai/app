@@ -1,0 +1,50 @@
+{
+  "common": {
+    "send": "Senden",
+    "cancel": "Abbrechen",
+    "save": "Speichern",
+    "delete": "Löschen",
+    "edit": "Bearbeiten",
+    "search": "Suchen",
+    "menu": "Menü",
+    "settings": "Einstellungen",
+    "close": "Schließen",
+    "back": "Zurück"
+  },
+  "chat": {
+    "input_placeholder": "Was denkst du?",
+    "agent_typing": "KI schreibt...",
+    "no_messages": "Noch keine Nachrichten. Starte eine Unterhaltung!",
+    "send_message": "Nachricht senden",
+    "new_message": "Neue Nachricht"
+  },
+  "ai_instances": {
+    "title": "KI-Instanzen",
+    "create_new": "Neue KI erstellen",
+    "switch": "KI wechseln",
+    "current": "Aktuelle KI",
+    "name_placeholder": "Gib deiner KI einen Namen",
+    "create": "Erstellen",
+    "list": "Deine KIs",
+    "no_instances": "Noch keine KI-Instanzen. Erstelle deine erste!",
+    "switch_instance": "Wechseln zu {{name}}",
+    "active": "Aktiv"
+  },
+  "settings": {
+    "title": "Einstellungen",
+    "language": "Sprache",
+    "theme": "Design",
+    "theme_light": "Hell",
+    "theme_dark": "Dunkel",
+    "theme_system": "System",
+    "api_keys": "API-Schlüssel",
+    "about": "Über"
+  },
+  "errors": {
+    "generic": "Etwas ist schiefgelaufen. Bitte versuche es erneut.",
+    "network": "Netzwerkfehler. Bitte überprüfe deine Verbindung.",
+    "api_key_missing": "API-Schlüssel fehlt. Bitte konfiguriere ihn in den Einstellungen.",
+    "instance_not_found": "KI-Instanz nicht gefunden.",
+    "failed_to_send": "Nachricht konnte nicht gesendet werden. Bitte versuche es erneut."
+  }
+}

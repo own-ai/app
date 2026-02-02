@@ -1,0 +1,50 @@
+{
+  "common": {
+    "send": "Send",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "search": "Search",
+    "menu": "Menu",
+    "settings": "Settings",
+    "close": "Close",
+    "back": "Back"
+  },
+  "chat": {
+    "input_placeholder": "What are you thinking?",
+    "agent_typing": "AI is typing...",
+    "no_messages": "No messages yet. Start a conversation!",
+    "send_message": "Send message",
+    "new_message": "New message"
+  },
+  "ai_instances": {
+    "title": "AI Instances",
+    "create_new": "Create New AI",
+    "switch": "Switch AI",
+    "current": "Current AI",
+    "name_placeholder": "Name your AI",
+    "create": "Create",
+    "list": "Your AIs",
+    "no_instances": "No AI instances yet. Create your first one!",
+    "switch_instance": "Switch to {{name}}",
+    "active": "Active"
+  },
+  "settings": {
+    "title": "Settings",
+    "language": "Language",
+    "theme": "Theme",
+    "theme_light": "Light",
+    "theme_dark": "Dark",
+    "theme_system": "System",
+    "api_keys": "API Keys",
+    "about": "About"
+  },
+  "errors": {
+    "generic": "Something went wrong. Please try again.",
+    "network": "Network error. Please check your connection.",
+    "api_key_missing": "API key is missing. Please configure it in settings.",
+    "instance_not_found": "AI instance not found.",
+    "failed_to_send": "Failed to send message. Please try again."
+  }
+}
