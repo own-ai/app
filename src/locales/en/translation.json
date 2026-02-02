@@ -16,7 +16,9 @@
     "agent_typing": "AI is typing...",
     "no_messages": "No messages yet. Start a conversation!",
     "send_message": "Send message",
-    "new_message": "New message"
+    "new_message": "New message",
+    "tools_used": "Used",
+    "loading_messages": "Loading messages..."
   },
   "ai_instances": {
     "title": "AI Instances",
@@ -28,7 +30,9 @@
     "list": "Your AIs",
     "no_instances": "No AI instances yet. Create your first one!",
     "switch_instance": "Switch to {{name}}",
-    "active": "Active"
+    "active": "Active",
+    "welcome_title": "Welcome to ownAI",
+    "welcome_subtitle": "Create your first AI instance to get started"
   },
   "settings": {
     "title": "Settings",

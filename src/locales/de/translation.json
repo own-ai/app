@@ -16,7 +16,9 @@
     "agent_typing": "KI schreibt...",
     "no_messages": "Noch keine Nachrichten. Starte eine Unterhaltung!",
     "send_message": "Nachricht senden",
-    "new_message": "Neue Nachricht"
+    "new_message": "Neue Nachricht",
+    "tools_used": "Verwendet",
+    "loading_messages": "Nachrichten werden geladen..."
   },
   "ai_instances": {
     "title": "KI-Instanzen",
@@ -28,7 +30,9 @@
     "list": "Deine KIs",
     "no_instances": "Noch keine KI-Instanzen. Erstelle deine erste!",
     "switch_instance": "Wechseln zu {{name}}",
-    "active": "Aktiv"
+    "active": "Aktiv",
+    "welcome_title": "Willkommen bei ownAI",
+    "welcome_subtitle": "Erstelle deine erste KI-Instanz, um loszulegen"
   },
   "settings": {
     "title": "Einstellungen",

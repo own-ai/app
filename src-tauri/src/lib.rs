@@ -1,6 +1,7 @@
 // Modules
 pub mod ai_instances;
 pub mod commands;
+pub mod database;
 pub mod utils;
 
 use tauri::Manager;
@@ -27,6 +28,9 @@ pub fn run() {
             commands::instances::set_active_instance,
             commands::instances::get_active_instance,
             commands::instances::delete_ai_instance,
+            commands::chat::send_message_mock,
+            commands::chat::save_message,
+            commands::chat::load_messages,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
