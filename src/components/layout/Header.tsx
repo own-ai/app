@@ -7,14 +7,9 @@ export const Header = () => {
   const { t } = useTranslation();
   
   return (
-    <header className="flex items-center justify-between px-8 py-4 border-b border-border bg-background sticky top-0 z-10">
-      {/* Logo */}
-      <h1 className="text-xl font-serif tracking-tight">ownAI</h1>
-      
+    <header className="flex items-center justify-between px-5 py-4 border-b border-border bg-background sticky top-0 z-10">
       {/* AI Instance Selector */}
-      <div className="flex-1 flex justify-center">
-        <AIInstanceSelector />
-      </div>
+      <AIInstanceSelector />
       
       {/* Actions */}
       <div className="flex items-center gap-3">

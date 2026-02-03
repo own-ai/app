@@ -8,13 +8,13 @@ importers:
 
   .:
     dependencies:
-      '@fontsource/inter':
-        specifier: ^5.2.8
-        version: 5.2.8
-      '@fontsource/jetbrains-mono':
-        specifier: ^5.2.8
-        version: 5.2.8
-      '@fontsource/newsreader':
+      '@fontsource-variable/noto-sans':
+        specifier: ^5.2.10
+        version: 5.2.10
+      '@fontsource-variable/noto-serif':
+        specifier: ^5.2.9
+        version: 5.2.9
+      '@fontsource/noto-sans-mono':
         specifier: ^5.2.10
         version: 5.2.10
       '@tanstack/react-virtual':
@@ -336,14 +336,14 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@fontsource/inter@5.2.8':
-    resolution: {integrity: sha512-P6r5WnJoKiNVV+zvW2xM13gNdFhAEpQ9dQJHt3naLvfg+LkF2ldgSLiF4T41lf1SQCM9QmkqPTn4TH568IRagg==}
+  '@fontsource-variable/noto-sans@5.2.10':
+    resolution: {integrity: sha512-wyFgKkFu7jki5kEL8qv7avjQ8rxHX0J/nhLWvbR9T0hOH1HRKZEvb9EW9lMjZfWHHfEzKkYf5J+NadwgCS7TXA==}
 
-  '@fontsource/jetbrains-mono@5.2.8':
-    resolution: {integrity: sha512-6w8/SG4kqvIMu7xd7wt6x3idn1Qux3p9N62s6G3rfldOUYHpWcc2FKrqf+Vo44jRvqWj2oAtTHrZXEP23oSKwQ==}
+  '@fontsource-variable/noto-serif@5.2.9':
+    resolution: {integrity: sha512-9McZzWeOjD/Gsko+w6A2lpGlHXZw5J2JmxaSMgopiIHoMYI1m6DAyFrzG9QQ0WjdWxj5jZfKM0EGSBVZHC6+nw==}
 
-  '@fontsource/newsreader@5.2.10':
-    resolution: {integrity: sha512-TFaYzoFhDqarUyV2yYjgZZEwT4bpaj6sGBnXSnFknQ/QB8/9LzfY6IO9+inHOX4zzPp87Z7/KuG1OI5gr91Q3A==}
+  '@fontsource/noto-sans-mono@5.2.10':
+    resolution: {integrity: sha512-YG3ev3Bc24UGd1x0THgtU3LG1j+sKahhDgo0vTpEfB0wkXD1+tGSq1fJD+QqnYLXjPhMRNe0ZKWoUi1MPH7Qdg==}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -1523,11 +1523,11 @@ snapshots:
   '@esbuild/win32-x64@0.27.2':
     optional: true
 
-  '@fontsource/inter@5.2.8': {}
+  '@fontsource-variable/noto-sans@5.2.10': {}
 
-  '@fontsource/jetbrains-mono@5.2.8': {}
+  '@fontsource-variable/noto-serif@5.2.9': {}
 
-  '@fontsource/newsreader@5.2.10': {}
+  '@fontsource/noto-sans-mono@5.2.10': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
