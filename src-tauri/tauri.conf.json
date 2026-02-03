@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ownai",
+  "productName": "ownAI",
   "version": "0.1.0",
   "identifier": "com.ownai.app",
   "build": {
