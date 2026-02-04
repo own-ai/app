@@ -1,8 +1,9 @@
 [package]
 name = "ownai"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+license = "MPL-2.0"
+description = "A self-evolving AI companion with continuous memory and local-first privacy."
+repository = "https://github.com/own-ai/app"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
