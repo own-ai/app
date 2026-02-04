@@ -2,12 +2,16 @@
 pub mod ai_instances;
 pub mod commands;
 pub mod database;
+pub mod memory;
 pub mod utils;
 
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize ort-tract backend for cross-platform compatibility
+    ort::set_api(ort_tract::api());
+    
     // Initialize logging
     tracing_subscriber::fmt::init();
     
@@ -31,6 +35,9 @@ pub fn run() {
             commands::chat::send_message_mock,
             commands::chat::save_message,
             commands::chat::load_messages,
+            commands::memory::test_store_memory,
+            commands::memory::test_recall_memories,
+            commands::memory::get_memory_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
