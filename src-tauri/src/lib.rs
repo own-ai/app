@@ -1,17 +1,18 @@
 // Modules
+pub mod agent;
 pub mod ai_instances;
 pub mod commands;
 pub mod database;
 pub mod memory;
 pub mod utils;
 
+use std::collections::HashMap;
+use std::sync::Arc;
 use tauri::Manager;
+use tokio::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Initialize ort-tract backend for cross-platform compatibility
-    ort::set_api(ort_tract::api());
-    
     // Initialize logging
     tracing_subscriber::fmt::init();
     
@@ -22,19 +23,32 @@ pub fn run() {
             let manager = ai_instances::AIInstanceManager::new()
                 .expect("Failed to initialize AI Instance Manager");
             
-            app.manage(std::sync::Arc::new(tokio::sync::Mutex::new(manager)));
+            app.manage(Arc::new(Mutex::new(manager)));
+            
+            // Initialize Agent Cache
+            let agent_cache: commands::chat::AgentCache = Arc::new(Mutex::new(HashMap::new()));
+            app.manage(agent_cache);
             
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Provider & API Key Management
+            commands::instances::get_providers,
+            commands::instances::save_api_key,
+            commands::instances::has_api_key,
+            commands::instances::delete_api_key,
+            // AI Instance Management
             commands::instances::create_ai_instance,
             commands::instances::list_ai_instances,
             commands::instances::set_active_instance,
             commands::instances::get_active_instance,
             commands::instances::delete_ai_instance,
-            commands::chat::send_message_mock,
-            commands::chat::save_message,
+            // Chat Commands
+            commands::chat::send_message,
+            commands::chat::stream_message,
             commands::chat::load_messages,
+            commands::chat::clear_agent_cache,
+            // Memory Testing (keep for now)
             commands::memory::test_store_memory,
             commands::memory::test_recall_memories,
             commands::memory::get_memory_stats,

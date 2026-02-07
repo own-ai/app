@@ -1,7 +1,12 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use tokio::time::Duration;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tauri::{Emitter, State};
+use tokio::sync::Mutex;
 
+use crate::agent::OwnAIAgent;
+use crate::ai_instances::AIInstanceManager;
 use crate::database::init_database;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,17 +24,52 @@ pub struct SendMessageRequest {
     pub content: String,
 }
 
-/// Mock chat command - simulates AI response
+/// Agent cache to avoid recreating agents for each message
+pub type AgentCache = Arc<Mutex<HashMap<String, OwnAIAgent>>>;
+
+/// Send a message and get AI response (non-streaming)
 #[tauri::command]
-pub async fn send_message_mock(
+pub async fn send_message(
     request: SendMessageRequest,
+    instance_manager: State<'_, Arc<Mutex<AIInstanceManager>>>,
+    agent_cache: State<'_, AgentCache>,
 ) -> Result<Message, String> {
-    // Simulate thinking time
-    tokio::time::sleep(Duration::from_millis(800)).await;
+    // 1. Get instance
+    let manager = instance_manager.lock().await;
+    let instance = manager
+        .get_instance(&request.instance_id)
+        .ok_or_else(|| format!("Instance not found: {}", request.instance_id))?
+        .clone();
+    drop(manager);
+
+    // 2. Get or create agent
+    let mut cache = agent_cache.lock().await;
     
-    // Generate mock response
-    let response_content = generate_mock_response(&request.content);
-    
+    if !cache.contains_key(&request.instance_id) {
+        // Initialize database for this instance
+        let db = init_database(&request.instance_id)
+            .await
+            .map_err(|e| format!("Failed to initialize database: {}", e))?;
+
+        // Create new agent
+        let agent = OwnAIAgent::new(&instance, db)
+            .await
+            .map_err(|e| format!("Failed to create agent: {}", e))?;
+
+        cache.insert(request.instance_id.clone(), agent);
+    }
+
+    let agent = cache
+        .get_mut(&request.instance_id)
+        .ok_or("Agent not found in cache")?;
+
+    // 3. Chat with agent
+    let response_content = agent
+        .chat(&request.content)
+        .await
+        .map_err(|e| format!("Agent error: {}", e))?;
+
+    // 4. Return response message
     let response = Message {
         id: uuid::Uuid::new_v4().to_string(),
         role: "agent".to_string(),
@@ -37,41 +77,69 @@ pub async fn send_message_mock(
         timestamp: Utc::now().to_rfc3339(),
         metadata: None,
     };
-    
+
+    tracing::info!(
+        "Message processed for instance: {} (length: {})",
+        request.instance_id,
+        response.content.len()
+    );
+
     Ok(response)
 }
 
-/// Save a message to the database
+/// Stream a message and get AI response chunk by chunk
 #[tauri::command]
-pub async fn save_message(
-    instance_id: String,
-    message: Message,
+pub async fn stream_message(
+    request: SendMessageRequest,
+    window: tauri::Window,
+    instance_manager: State<'_, Arc<Mutex<AIInstanceManager>>>,
+    agent_cache: State<'_, AgentCache>,
 ) -> Result<(), String> {
-    let pool = init_database(&instance_id)
+    // 1. Get instance
+    let manager = instance_manager.lock().await;
+    let instance = manager
+        .get_instance(&request.instance_id)
+        .ok_or_else(|| format!("Instance not found: {}", request.instance_id))?
+        .clone();
+    drop(manager);
+
+    // 2. Get or create agent
+    let mut cache = agent_cache.lock().await;
+
+    if !cache.contains_key(&request.instance_id) {
+        // Initialize database for this instance
+        let db = init_database(&request.instance_id)
+            .await
+            .map_err(|e| format!("Failed to initialize database: {}", e))?;
+
+        // Create new agent
+        let agent = OwnAIAgent::new(&instance, db)
+            .await
+            .map_err(|e| format!("Failed to create agent: {}", e))?;
+
+        cache.insert(request.instance_id.clone(), agent);
+    }
+
+    let agent = cache
+        .get_mut(&request.instance_id)
+        .ok_or("Agent not found in cache")?;
+
+    // 3. Stream chat with agent
+    let window_clone = window.clone();
+    let instance_id = request.instance_id.clone();
+
+    agent
+        .stream_chat(&request.content, move |chunk| {
+            // Emit each chunk to the frontend
+            if let Err(e) = window_clone.emit("agent:token", chunk) {
+                tracing::error!("Failed to emit token: {}", e);
+            }
+        })
         .await
-        .map_err(|e| e.to_string())?;
-    
-    let metadata_json = message.metadata
-        .as_ref()
-        .and_then(|m| serde_json::to_string(m).ok());
-    
-    sqlx::query(
-        r#"
-        INSERT INTO messages (id, role, content, timestamp, metadata)
-        VALUES (?, ?, ?, ?, ?)
-        "#,
-    )
-    .bind(&message.id)
-    .bind(&message.role)
-    .bind(&message.content)
-    .bind(&message.timestamp)
-    .bind(metadata_json)
-    .execute(&pool)
-    .await
-    .map_err(|e| format!("Failed to save message: {}", e))?;
-    
-    tracing::debug!("Message saved: {} ({})", message.id, message.role);
-    
+        .map_err(|e| format!("Streaming error: {}", e))?;
+
+    tracing::info!("Streaming completed for instance: {}", instance_id);
+
     Ok(())
 }
 
@@ -85,7 +153,7 @@ pub async fn load_messages(
     let pool = init_database(&instance_id)
         .await
         .map_err(|e| e.to_string())?;
-    
+
     let messages = sqlx::query_as::<_, (String, String, String, String, Option<String>)>(
         r#"
         SELECT id, role, content, timestamp, metadata
@@ -99,7 +167,7 @@ pub async fn load_messages(
     .fetch_all(&pool)
     .await
     .map_err(|e| format!("Failed to load messages: {}", e))?;
-    
+
     let messages: Vec<Message> = messages
         .into_iter()
         .map(|(id, role, content, timestamp, metadata)| Message {
@@ -110,31 +178,22 @@ pub async fn load_messages(
             metadata: metadata.and_then(|m| serde_json::from_str(&m).ok()),
         })
         .collect();
-    
-    tracing::debug!("Loaded {} messages", messages.len());
-    
+
+    tracing::debug!("Loaded {} messages for instance: {}", messages.len(), instance_id);
+
     Ok(messages)
 }
 
-/// Generate a mock AI response
-fn generate_mock_response(user_message: &str) -> String {
-    let lower = user_message.to_lowercase();
+/// Clear agent cache for an instance (useful when switching models/settings)
+#[tauri::command]
+pub async fn clear_agent_cache(
+    instance_id: String,
+    agent_cache: State<'_, AgentCache>,
+) -> Result<(), String> {
+    let mut cache = agent_cache.lock().await;
+    cache.remove(&instance_id);
     
-    // Simple pattern matching for demo purposes
-    if lower.contains("hallo") || lower.contains("hi") || lower.contains("hello") {
-        "Hallo! Wie kann ich dir heute helfen? Ich bin ein Mock-Agent und antworte mit vordefinierten Nachrichten, bis die echte LLM-Integration implementiert ist.".to_string()
-    } else if lower.contains("wie geht") || lower.contains("how are") {
-        "Mir geht es gut, danke! Ich bin bereit, dir bei deinen Aufgaben zu helfen. Was möchtest du heute erreichen?".to_string()
-    } else if lower.contains("wetter") || lower.contains("weather") {
-        "Das Wetter ist heute schön! ☀️\n\n(Dies ist eine Mock-Antwort. In Phase 3 werde ich echte Wetter-Tools erstellen können.)".to_string()
-    } else if lower.contains("code") || lower.contains("programmier") {
-        "Ich kann dir beim Programmieren helfen! Hier ist ein Beispiel:\n\n```rust\nfn main() {\n    println!(\"Hello, ownAI!\");\n}\n```\n\nWas möchtest du erstellen?".to_string()
-    } else if lower.contains("danke") || lower.contains("thank") {
-        "Gerne! Lass mich wissen, wenn du noch etwas brauchst. 😊".to_string()
-    } else {
-        format!(
-            "Ich habe deine Nachricht verstanden: \"{}\"\n\nIch bin momentan ein Mock-Agent und gebe vordefinierte Antworten. In den nächsten Phasen werde ich:\n\n1. **Phase 2**: Ein echtes Memory-System erhalten\n2. **Phase 3**: Selbst Tools programmieren können\n3. **Phase 4**: Deep Agent Features wie TODO-Listen nutzen\n\nBis dahin helfe ich dir gerne mit diesen Demo-Antworten!",
-            user_message
-        )
-    }
+    tracing::info!("Agent cache cleared for instance: {}", instance_id);
+    
+    Ok(())
 }

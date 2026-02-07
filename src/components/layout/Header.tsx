@@ -3,7 +3,11 @@ import { Menu, Settings, Search } from 'lucide-react';
 import { IconButton } from '@/components/ui/IconButton';
 import { AIInstanceSelector } from '@/components/instances/AIInstanceSelector';
 
-export const Header = () => {
+interface HeaderProps {
+  onSettingsClick?: () => void;
+}
+
+export const Header = ({ onSettingsClick }: HeaderProps) => {
   const { t } = useTranslation();
   
   return (
@@ -26,7 +30,7 @@ export const Header = () => {
         <IconButton
           icon={Settings}
           label={t('common.settings')}
-          onClick={() => console.log('Settings clicked')}
+          onClick={onSettingsClick}
         />
       </div>
     </header>

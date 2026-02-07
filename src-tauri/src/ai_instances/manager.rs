@@ -1,5 +1,8 @@
-use super::models::AIInstance;
-use crate::utils::paths::{get_config_path, get_instances_path, get_instance_tools_path, get_instance_workspace_path};
+use super::models::{AIInstance, LLMProvider};
+use crate::utils::paths::{
+    get_config_path, get_instance_db_path, get_instance_tools_path,
+    get_instance_workspace_path, get_instances_path,
+};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use std::collections::HashMap;
@@ -24,31 +27,51 @@ impl AIInstanceManager {
     }
     
     /// Create a new AI instance
-    pub fn create_instance(&mut self, name: String) -> Result<AIInstance> {
+    pub fn create_instance(
+        &mut self,
+        name: String,
+        provider: LLMProvider,
+        model: String,
+        api_base_url: Option<String>,
+    ) -> Result<AIInstance> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
-        
+
+        // Get paths for this instance
+        let db_path = get_instance_db_path(&id)?;
+        let tools_path = get_instance_tools_path(&id)?;
+
         let instance = AIInstance {
             id: id.clone(),
             name,
+            provider,
+            model,
+            api_base_url,
+            db_path: Some(db_path),
+            tools_path: Some(tools_path),
             created_at: now,
             last_active: now,
         };
-        
+
         // Create instance directories
         self.create_instance_directories(&id)?;
-        
+
         // Add to instances map
         self.instances.insert(id.clone(), instance.clone());
-        
+
         // Save to disk
         self.save_instances()?;
-        
+
         // Set as active instance
         self.active_instance_id = Some(id.clone());
-        
-        tracing::info!("Created new AI instance: {} ({})", instance.name, instance.id);
-        
+
+        tracing::info!(
+            "Created new AI instance: {} ({}) with provider: {:?}",
+            instance.name,
+            instance.id,
+            instance.provider
+        );
+
         Ok(instance)
     }
     

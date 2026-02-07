@@ -1,19 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { useTranslation } from 'react-i18next';
 import { Header } from '@/components/layout/Header';
 import { MessageList } from '@/components/chat/MessageList';
 import { MessageInput } from '@/components/chat/MessageInput';
-import { TypingIndicator } from '@/components/chat/TypingIndicator';
 import { CreateInstanceDialog } from '@/components/instances/CreateInstanceDialog';
+import { Settings } from '@/components/settings/Settings';
 import { useChatStore } from '@/stores/chatStore';
 import { useInstanceStore } from '@/stores/instanceStore';
 
 function App() {
   const { t } = useTranslation();
-  const { messages, isTyping, addMessage, setTyping, setMessages } = useChatStore();
-  const { instances, activeInstance, loadInstances, createInstance } = useInstanceStore();
+  const { messages, isStreaming, addMessage, startAgentMessage, appendToLastMessage, setStreaming, setMessages } = useChatStore();
+  const { instances, activeInstance, loadInstances } = useInstanceStore();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
 
   // Load instances on mount
@@ -58,78 +60,57 @@ function App() {
     }
   };
 
-  const handleSend = async (content: string) => {
+  const handleSend = useCallback(async (content: string) => {
     if (!activeInstance) return;
 
-    // Add user message
-    const userMessage = {
+    // Add user message to UI (backend will save it)
+    addMessage({
       role: 'user' as const,
       content,
-    };
-    addMessage(userMessage);
+    });
 
-    // Save user message to database
+    // Start empty agent message for streaming
+    startAgentMessage();
+
+    let unlisten: UnlistenFn | null = null;
+
     try {
-      await invoke('save_message', {
-        instanceId: activeInstance.id,
-        message: {
-          id: messages[messages.length]?.id || crypto.randomUUID(),
-          role: 'user',
-          content,
-          timestamp: new Date().toISOString(),
-          metadata: null,
-        },
+      // Listen for streaming tokens
+      unlisten = await listen<string>('agent:token', (event) => {
+        appendToLastMessage(event.payload);
       });
-    } catch (error) {
-      console.error('Failed to save user message:', error);
-    }
 
-    // Show typing indicator
-    setTyping(true);
-
-    try {
-      // Call mock agent (Note: Rust uses snake_case)
-      const response = await invoke<any>('send_message_mock', {
+      // Call streaming endpoint (backend saves both messages)
+      await invoke('stream_message', {
         request: {
           instance_id: activeInstance.id,
           content,
         },
       });
-
-      // Add agent message
-      addMessage({
-        role: 'agent' as const,
-        content: response.content,
-      });
-
-      // Save agent message to database
-      await invoke('save_message', {
-        instanceId: activeInstance.id,
-        message: {
-          ...response,
-          timestamp: new Date().toISOString(),
-        },
-      });
     } catch (error) {
       console.error('Failed to get response:', error);
+      // Keep partial response visible, add error as system message
       addMessage({
         role: 'system' as const,
-        content: `Error: ${error}`,
+        content: t('chat.streaming_error', { error: String(error) }),
       });
     } finally {
-      setTyping(false);
+      // Clean up listener
+      if (unlisten) {
+        unlisten();
+      }
+      setStreaming(false);
     }
-  };
+  }, [activeInstance, addMessage, startAgentMessage, appendToLastMessage, setStreaming, t]);
 
-  const handleCreateInstance = async (name: string) => {
-    await createInstance(name);
-    setShowCreateDialog(false);
+  const handleOpenSettings = () => {
+    setShowSettings(true);
   };
 
   if (instances.length === 0 && !activeInstance) {
     return (
       <div className="h-screen flex flex-col bg-background">
-        <Header />
+        <Header onSettingsClick={handleOpenSettings} />
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
             <h2 className="text-2xl font-serif mb-4">{t('ai_instances.welcome_title')}</h2>
@@ -139,7 +120,11 @@ function App() {
         <CreateInstanceDialog
           isOpen={showCreateDialog}
           onClose={() => setShowCreateDialog(false)}
-          onCreate={handleCreateInstance}
+          onOpenSettings={handleOpenSettings}
+        />
+        <Settings
+          isOpen={showSettings}
+          onClose={() => setShowSettings(false)}
         />
       </div>
     );
@@ -147,7 +132,7 @@ function App() {
 
   return (
     <div className="h-screen flex flex-col bg-background">
-      <Header />
+      <Header onSettingsClick={handleOpenSettings} />
       
       <main className="flex-1 flex flex-col overflow-hidden">
         {isLoadingMessages ? (
@@ -155,13 +140,21 @@ function App() {
             <p>{t('chat.loading_messages')}</p>
           </div>
         ) : (
-          <MessageList messages={messages} />
+          <MessageList messages={messages} isStreaming={isStreaming} />
         )}
-        
-        {isTyping && <TypingIndicator />}
       </main>
       
-      <MessageInput onSend={handleSend} disabled={!activeInstance || isTyping} />
+      <MessageInput onSend={handleSend} disabled={!activeInstance || isStreaming} />
+      
+      <CreateInstanceDialog
+        isOpen={showCreateDialog}
+        onClose={() => setShowCreateDialog(false)}
+        onOpenSettings={handleOpenSettings}
+      />
+      <Settings
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+      />
     </div>
   );
 }

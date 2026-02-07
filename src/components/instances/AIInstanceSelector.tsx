@@ -7,14 +7,9 @@ import { cn } from '@/utils/cn';
 
 export const AIInstanceSelector = () => {
   const { t } = useTranslation();
-  const { instances, activeInstance, createInstance, switchInstance } = useInstanceStore();
+  const { instances, activeInstance, switchInstance } = useInstanceStore();
   const [isOpen, setIsOpen] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  
-  const handleCreate = async (name: string) => {
-    await createInstance(name);
-    setIsDialogOpen(false);
-  };
   
   const handleSwitch = async (id: string) => {
     await switchInstance(id);
@@ -93,7 +88,6 @@ export const AIInstanceSelector = () => {
       <CreateInstanceDialog
         isOpen={isDialogOpen}
         onClose={() => setIsDialogOpen(false)}
-        onCreate={handleCreate}
       />
     </>
   );

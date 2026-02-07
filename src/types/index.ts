@@ -10,14 +10,32 @@ export interface Message {
   };
 }
 
+// Provider Types
+export type ProviderType = 'anthropic' | 'openai' | 'ollama';
+
+export interface ProviderInfo {
+  id: ProviderType;
+  name: string;
+  needs_api_key: boolean;
+  has_api_key: boolean;
+  suggested_models: string[];
+  default_model: string | null;
+}
+
 // AI Instance Types
 export interface AIInstance {
   id: string;
   name: string;
+  provider: ProviderType;
+  model: string;
+  api_base_url?: string;
   created_at: string;
   last_active: string;
 }
 
 export interface CreateInstanceRequest {
   name: string;
+  provider: ProviderType;
+  model: string;
+  api_base_url?: string;
 }

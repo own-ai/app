@@ -1,22 +1,30 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import { AIInstance, CreateInstanceRequest } from '@/types';
+import { AIInstance, CreateInstanceRequest, ProviderInfo, ProviderType } from '@/types';
 
 interface InstanceStore {
   instances: AIInstance[];
   activeInstance: AIInstance | null;
+  providers: ProviderInfo[];
   isLoading: boolean;
   
-  // Actions
+  // Instance Actions
   loadInstances: () => Promise<void>;
-  createInstance: (name: string) => Promise<void>;
+  createInstance: (request: CreateInstanceRequest) => Promise<void>;
   switchInstance: (id: string) => Promise<void>;
   deleteInstance: (id: string) => Promise<void>;
+  
+  // Provider & API Key Actions
+  loadProviders: () => Promise<void>;
+  saveApiKey: (provider: ProviderType, apiKey: string) => Promise<void>;
+  deleteApiKey: (provider: ProviderType) => Promise<void>;
+  hasApiKey: (provider: ProviderType) => Promise<boolean>;
 }
 
 export const useInstanceStore = create<InstanceStore>((set, get) => ({
   instances: [],
   activeInstance: null,
+  providers: [],
   isLoading: false,
   
   loadInstances: async () => {
@@ -40,10 +48,9 @@ export const useInstanceStore = create<InstanceStore>((set, get) => ({
     }
   },
   
-  createInstance: async (name: string) => {
+  createInstance: async (request: CreateInstanceRequest) => {
     set({ isLoading: true });
     try {
-      const request: CreateInstanceRequest = { name };
       const instance = await invoke<AIInstance>('create_ai_instance', { request });
       
       set((state) => ({
@@ -94,6 +101,46 @@ export const useInstanceStore = create<InstanceStore>((set, get) => ({
       throw error;
     } finally {
       set({ isLoading: false });
+    }
+  },
+  
+  loadProviders: async () => {
+    try {
+      const providers = await invoke<ProviderInfo[]>('get_providers');
+      set({ providers });
+    } catch (error) {
+      console.error('Failed to load providers:', error);
+    }
+  },
+  
+  saveApiKey: async (provider: ProviderType, apiKey: string) => {
+    try {
+      await invoke('save_api_key', { provider, apiKey });
+      // Reload providers to update has_api_key status
+      await get().loadProviders();
+    } catch (error) {
+      console.error('Failed to save API key:', error);
+      throw error;
+    }
+  },
+  
+  deleteApiKey: async (provider: ProviderType) => {
+    try {
+      await invoke('delete_api_key', { provider });
+      // Reload providers to update has_api_key status
+      await get().loadProviders();
+    } catch (error) {
+      console.error('Failed to delete API key:', error);
+      throw error;
+    }
+  },
+  
+  hasApiKey: async (provider: ProviderType) => {
+    try {
+      return await invoke<boolean>('has_api_key', { provider });
+    } catch (error) {
+      console.error('Failed to check API key:', error);
+      return false;
     }
   },
 }));

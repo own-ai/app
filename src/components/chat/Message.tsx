@@ -5,9 +5,10 @@ import { useTranslation } from 'react-i18next';
 
 interface MessageProps {
   message: MessageType;
+  isStreaming?: boolean;
 }
 
-export const Message = ({ message }: MessageProps) => {
+export const Message = ({ message, isStreaming = false }: MessageProps) => {
   const { t, i18n } = useTranslation();
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -38,6 +39,10 @@ export const Message = ({ message }: MessageProps) => {
         )}
       >
         <MessageContent content={message.content} role={message.role} />
+        {/* Streaming cursor */}
+        {isStreaming && (
+          <span className="inline-block w-2 h-4 ml-0.5 bg-foreground animate-pulse align-text-bottom" />
+        )}
       </div>
       
       {/* Metadata - Tool Calls */}

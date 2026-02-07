@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
+use candle_core::{DType, Device};
 use chrono::{DateTime, Utc};
-use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use fastembed::Qwen3TextEmbedding;
 use serde::{Deserialize, Serialize};
 use sqlx::{Pool, Row, Sqlite};
 
@@ -31,7 +32,7 @@ pub struct MemoryEntry {
 
 /// Long-term memory with vector search using fastembed
 pub struct LongTermMemory {
-    embedder: TextEmbedding,
+    embedder: Qwen3TextEmbedding,
     db: Pool<Sqlite>,
 }
 
@@ -40,10 +41,18 @@ impl LongTermMemory {
     pub async fn new(db: Pool<Sqlite>) -> Result<Self> {
         tracing::info!("Initializing fastembed model...");
         
-        // Initialize fastembed with default model (all-MiniLM-L6-v2)
-        let embedder = TextEmbedding::try_new(
-            InitOptions::new(EmbeddingModel::AllMiniLML6V2).with_show_download_progress(true),
+        // Initialize fastembed
+        let device = Device::Cpu;
+        let embedder = Qwen3TextEmbedding::from_hf(
+            "Qwen/Qwen3-Embedding-0.6B",
+            &device,
+            DType::F32,
+            512,
         )
+        .map_err(|e| {
+            tracing::error!("Fastembed initialization failed with error: {:#}", e);
+            e
+        })
         .context("Failed to initialize fastembed model")?;
         
         tracing::info!("Fastembed model loaded successfully");
@@ -96,7 +105,7 @@ impl LongTermMemory {
         // Generate embedding
         let embeddings = self
             .embedder
-            .embed(vec![entry.content.clone()], None)
+            .embed(&[entry.content.clone()])
             .context("Failed to generate embedding")?;
         
         let embedding_vec = &embeddings[0];
@@ -144,7 +153,7 @@ impl LongTermMemory {
         // Generate query embedding
         let query_embeddings = self
             .embedder
-            .embed(vec![query.to_string()], None)
+            .embed(&[query.to_string()])
             .context("Failed to generate query embedding")?;
         
         let query_vec = &query_embeddings[0];

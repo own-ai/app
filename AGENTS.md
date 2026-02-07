@@ -107,8 +107,7 @@ app/
 │   │   │   ├── Message.tsx       # Message display (role-based styling)
 │   │   │   ├── MessageContent.tsx # Markdown rendering, code blocks
 │   │   │   ├── MessageInput.tsx  # Auto-growing textarea
-│   │   │   ├── MessageList.tsx   # Virtualized scrolling list
-│   │   │   └── TypingIndicator.tsx
+│   │   │   └── MessageList.tsx   # Virtualized scrolling list
 │   │   ├── instances/            # AI instance management
 │   │   ├── layout/               # Header, Container
 │   │   └── ui/                   # Reusable UI primitives

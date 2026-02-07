@@ -6,9 +6,10 @@ import { Message as MessageType } from '@/types';
 
 interface MessageListProps {
   messages: MessageType[];
+  isStreaming?: boolean;
 }
 
-export const MessageList = ({ messages }: MessageListProps) => {
+export const MessageList = ({ messages, isStreaming = false }: MessageListProps) => {
   const { t } = useTranslation();
   const parentRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -19,14 +20,22 @@ export const MessageList = ({ messages }: MessageListProps) => {
     getScrollElement: () => parentRef.current,
     estimateSize: () => 150, // Estimated height per message
     overscan: 5, // Number of items to render outside visible area
+    measureElement: (element) => element.getBoundingClientRect().height, // Measure actual height
   });
   
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when new messages arrive or during streaming
   useEffect(() => {
     if (parentRef.current) {
       parentRef.current.scrollTop = parentRef.current.scrollHeight;
     }
   }, [messages.length]);
+
+  // Auto-scroll during streaming (content updates)
+  useEffect(() => {
+    if (isStreaming && parentRef.current) {
+      parentRef.current.scrollTop = parentRef.current.scrollHeight;
+    }
+  }, [isStreaming, messages[messages.length - 1]?.content]);
   
   if (messages.length === 0) {
     return (
@@ -50,20 +59,31 @@ export const MessageList = ({ messages }: MessageListProps) => {
           position: 'relative',
         }}
       >
-        {virtualizer.getVirtualItems().map((virtualItem) => (
-          <div
-            key={virtualItem.key}
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              width: '100%',
-              transform: `translateY(${virtualItem.start}px)`,
-            }}
-          >
-            <MessageComponent message={messages[virtualItem.index]} />
-          </div>
-        ))}
+        {virtualizer.getVirtualItems().map((virtualItem) => {
+          const isLastMessage = virtualItem.index === messages.length - 1;
+          const message = messages[virtualItem.index];
+          const showStreamingCursor = isStreaming && isLastMessage && message.role === 'agent';
+          
+          return (
+            <div
+              key={virtualItem.key}
+              data-index={virtualItem.index}
+              ref={virtualizer.measureElement}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                transform: `translateY(${virtualItem.start}px)`,
+              }}
+            >
+              <MessageComponent 
+                message={message} 
+                isStreaming={showStreamingCursor}
+              />
+            </div>
+          );
+        })}
       </div>
     </div>
   );
