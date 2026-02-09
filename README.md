@@ -15,9 +15,15 @@ ownAI is designed as a **privacy-first, self-improving personal agent** that run
 
 - **Continuous Conversation**: One flowing dialogue that picks up where you left off, no matter how much time has passed.
 - **Hierarchical Memory System**: Working memory for recent context, automatic summarization for efficiency, and long-term memory with semantic search.
-- **Self-Programming Capabilities**: The agent can write and deploy new tools when it encounters tasks beyond its current abilities.
+- **Two-Level Self-Programming**:
+  - **Tools**: Backend functions (Rhai scripts) the LLM calls directly for data processing, API calls, timers, and more.
+  - **Programs (Canvas)**: Interactive HTML/CSS/JS applications the agent generates for visual use cases -- dashboards, games, forms, and full mini-apps displayed in-app.
+- **Scheduled Tasks**: Cron-like system for recurring agent actions (reminders, price monitoring, daily briefings).
+- **Deep Agent Features**: Planning via TODO lists, specialized sub-agents, filesystem access for persistent workspace.
+- **Multiple AI Instances**: Create independent AI agents with separate memories, tools, and programs.
 - **Privacy-First Architecture**: All data stored locally, complete user control, no cloud dependencies required.
 - **Cross-Platform**: Desktop application built with Tauri 2.0, with mobile support planned.
+- **Internationalization**: English (default) and German, with automatic system language detection.
 
 ## Tech Stack
 
@@ -107,12 +113,16 @@ ownAI follows a minimalist, typography-driven design philosophy. Key principles:
 
 ## Roadmap
 
-- Memory system with automatic summarization
-- LLM provider integration
-- Self-programming capabilities via Rhai scripting
-- Tool registry and dynamic tool loading
-- Mobile applications (iOS/Android via Tauri Mobile)
-- Proactive suggestions based on learned patterns
+- [x] Hierarchical memory system with automatic summarization
+- [x] Multi-provider LLM integration (Anthropic, OpenAI, Ollama)
+- [ ] Self-programming: Rhai-based backend tools
+- [ ] Canvas system: LLM-generated interactive HTML programs
+- [ ] Deep agent features: planning, sub-agents, filesystem tools
+- [ ] Scheduled tasks (cron-like recurring agent actions)
+- [ ] Tool and program marketplace (community sharing)
+- [ ] Mobile applications (iOS/Android via Tauri Mobile)
+- [ ] Voice interface and multimodal support
+- [ ] Proactive suggestions based on learned patterns
 
 ## License
 

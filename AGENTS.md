@@ -20,7 +20,10 @@ ownAI is a personal AI agent application built with Tauri 2.0 and Rust. Unlike t
 2. **SQLite + fastembed**: Unified storage for structured data and vector embeddings
 3. **rig-core**: Production-ready LLM framework with unified interface
 4. **Tauri Commands**: Type-safe bridge between React frontend and Rust backend
-5. **Rhai Scripting**: Safe, sandboxed scripting for agent-generated tools
+5. **Two-Level Self-Programming**:
+   - **Tools (Rhai)**: Backend functions the LLM calls directly. Sandboxed Rhai scripts for data processing, API calls, etc. No UI.
+   - **Programs (Canvas)**: LLM-generated HTML/CSS/JS single-page apps rendered in an iframe. For visual use cases (dashboards, games, forms). Communicate with backend via Bridge API (postMessage).
+6. **Scheduled Tasks**: Cron-like system (tokio-cron-scheduler) for recurring agent actions
 
 ## Development Setup
 

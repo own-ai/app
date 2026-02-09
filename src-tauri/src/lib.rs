@@ -4,6 +4,7 @@ pub mod ai_instances;
 pub mod commands;
 pub mod database;
 pub mod memory;
+pub mod tools;
 pub mod utils;
 
 use std::collections::HashMap;

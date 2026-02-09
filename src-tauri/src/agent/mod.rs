@@ -7,19 +7,20 @@ use rig::completion::Prompt;
 use rig::message::Message as RigMessage;
 use rig::providers::{anthropic, ollama, openai};
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
+use rig::tool::ToolDyn;
 use sqlx::{Pool, Sqlite};
+use std::path::PathBuf;
 
 use crate::ai_instances::{AIInstance, APIKeyStorage, LLMProvider};
 use crate::memory::{
     working_memory::Message, ContextBuilder, LongTermMemory, SummarizationAgent, WorkingMemory,
 };
+use crate::tools::filesystem::{EditFileTool, GrepTool, LsTool, ReadFileTool, WriteFileTool};
+use crate::tools::planning::{self, SharedTodoList, WriteTodosTool};
+use crate::utils::paths;
 
-/// Type aliases for each provider's agent type
-type AnthropicAgent = Agent<anthropic::completion::CompletionModel>;
-type OpenAIAgent = Agent<openai::CompletionModel>;
-type OllamaAgent = Agent<ollama::CompletionModel>;
-
-/// Macro to process streaming responses uniformly across providers
+/// Macro to process streaming responses uniformly across providers.
+/// Handles both text chunks and multi-turn tool call items.
 macro_rules! process_stream {
     ($stream:expr, $callback:expr, $full_response:expr) => {
         while let Some(result) = $stream.next().await {
@@ -30,10 +31,16 @@ macro_rules! process_stream {
                             $callback(text.text.clone());
                             $full_response.push_str(&text.text);
                         }
-                        StreamedAssistantContent::Final(_) => break,
-                        _ => {} // Ignore other content types
+                        StreamedAssistantContent::Final(_) => {}
+                        _ => {} // Ignore other content types (tool use markers, etc.)
                     },
-                    _ => {} // Ignore other item types
+                    MultiTurnStreamItem::StreamUserItem(_) => {
+                        // Tool result sent back (multi-turn); stream continues
+                    }
+                    MultiTurnStreamItem::FinalResponse(_) => {
+                        // Final aggregated response; stream is done
+                    }
+                    _ => {} // Future variants
                 },
                 Err(e) => {
                     return Err(anyhow::anyhow!("Streaming error: {}", e));
@@ -43,22 +50,47 @@ macro_rules! process_stream {
     };
 }
 
-/// Provider-specific agent wrapper
-enum AgentProvider {
-    Anthropic(AnthropicAgent),
-    OpenAI(OpenAIAgent),
-    Ollama(OllamaAgent),
+/// Helper: Create the set of tools for an instance
+fn create_tools(instance_id: &str, todo_list: SharedTodoList) -> Vec<Box<dyn ToolDyn>> {
+    let workspace = paths::get_instance_workspace_path(instance_id)
+        .unwrap_or_else(|_| PathBuf::from("."));
+
+    let tools: Vec<Box<dyn ToolDyn>> = vec![
+        // Filesystem tools
+        Box::new(LsTool::new(workspace.clone())),
+        Box::new(ReadFileTool::new(workspace.clone())),
+        Box::new(WriteFileTool::new(workspace.clone())),
+        Box::new(EditFileTool::new(workspace.clone())),
+        Box::new(GrepTool::new(workspace)),
+        // Planning tool
+        Box::new(WriteTodosTool::new(todo_list)),
+    ];
+
+    tools
 }
 
-/// OwnAI Agent with Memory and LLM integration
+/// Provider-specific agent wrapper.
+/// Each variant holds a fully-built Agent with tools registered.
+enum AgentProvider {
+    Anthropic(Agent<anthropic::completion::CompletionModel>),
+    OpenAI(Agent<openai::CompletionModel>),
+    Ollama(Agent<ollama::CompletionModel>),
+}
+
+/// OwnAI Agent with Memory, Tools, and LLM integration
 pub struct OwnAIAgent {
     agent: AgentProvider,
     context_builder: ContextBuilder,
     db: Pool<Sqlite>,
+    #[allow(dead_code)]
+    todo_list: SharedTodoList,
 }
 
+/// Maximum number of multi-turn iterations for tool calling
+const MAX_TOOL_TURNS: usize = 50;
+
 impl OwnAIAgent {
-    /// Create a new OwnAI Agent
+    /// Create a new OwnAI Agent with tools
     pub async fn new(instance: &AIInstance, db: Pool<Sqlite>) -> Result<Self> {
         // Initialize Memory System components
         let working_memory = WorkingMemory::new(50_000); // 50k tokens
@@ -75,6 +107,9 @@ impl OwnAIAgent {
             db.clone(),
         );
 
+        // Create shared TODO list state
+        let todo_list = planning::create_shared_todo_list();
+
         // Load API key from keychain if needed
         let api_key = if instance.provider.needs_api_key() {
             APIKeyStorage::load(&instance.provider)?
@@ -83,17 +118,22 @@ impl OwnAIAgent {
             String::new()
         };
 
-        // Create provider-specific agent
+        let system_prompt = Self::system_prompt(&instance.name);
+
+        // Create provider-specific agent with tools
         let agent = match instance.provider {
             LLMProvider::Anthropic => {
                 let client = anthropic::Client::builder()
                     .api_key(&api_key)
                     .build()?;
 
+                let tools = create_tools(&instance.id, todo_list.clone());
+
                 let agent = client
                     .agent(&instance.model)
-                    .preamble(&Self::system_prompt(&instance.name))
+                    .preamble(&system_prompt)
                     .temperature(0.7)
+                    .tools(tools)
                     .build();
 
                 AgentProvider::Anthropic(agent)
@@ -104,11 +144,14 @@ impl OwnAIAgent {
                     .api_key(&api_key)
                     .build()?;
 
+                let tools = create_tools(&instance.id, todo_list.clone());
+
                 let agent = openai_client
                     .completions_api()
                     .agent(&instance.model)
-                    .preamble(&Self::system_prompt(&instance.name))
+                    .preamble(&system_prompt)
                     .temperature(0.7)
+                    .tools(tools)
                     .build();
 
                 AgentProvider::OpenAI(agent)
@@ -124,10 +167,12 @@ impl OwnAIAgent {
                     ollama::Client::new(Nothing)?
                 };
 
-                // Use the client directly as the model
+                let tools = create_tools(&instance.id, todo_list.clone());
+
                 let agent = ollama_client
                     .agent(&instance.model)
-                    .preamble(&Self::system_prompt(&instance.name))
+                    .preamble(&system_prompt)
+                    .tools(tools)
                     .build();
 
                 AgentProvider::Ollama(agent)
@@ -138,10 +183,11 @@ impl OwnAIAgent {
             agent,
             context_builder,
             db,
+            todo_list,
         })
     }
 
-    /// Main chat method - combines Memory + LLM
+    /// Main chat method (non-streaming) - combines Memory + Tools + LLM
     pub async fn chat(&mut self, user_message: &str) -> Result<String> {
         // 1. Add user message to working memory
         self.context_builder
@@ -156,16 +202,53 @@ impl OwnAIAgent {
         // 2. Build context from all memory layers
         let context = self.context_builder.build_context(user_message).await?;
 
-        let full_prompt = format!("{}\n\nUser: {}", context, user_message);
+        // 3. Build chat history from working memory
+        let messages = self.context_builder.working_memory().get_context();
+        let mut history: Vec<RigMessage> = messages
+            .iter()
+            .take(messages.len().saturating_sub(1))
+            .map(|msg| {
+                if msg.role == "user" {
+                    RigMessage::user(&msg.content)
+                } else {
+                    RigMessage::assistant(&msg.content)
+                }
+            })
+            .collect();
 
-        // 3. Call LLM based on provider
-        let response = match &self.agent {
-            AgentProvider::Anthropic(agent) => agent.prompt(&full_prompt).await?,
-            AgentProvider::OpenAI(agent) => agent.prompt(&full_prompt).await?,
-            AgentProvider::Ollama(agent) => agent.prompt(&full_prompt).await?,
+        // 4. Prepare prompt with memory context
+        let prompt = if !context.is_empty() {
+            format!("[Context from memory]\n{}\n\n{}", context, user_message)
+        } else {
+            user_message.to_string()
         };
 
-        // 4. Add agent response to working memory
+        // 5. Call LLM with multi-turn tool support
+        let response = match &self.agent {
+            AgentProvider::Anthropic(agent) => {
+                agent
+                    .prompt(&prompt)
+                    .with_history(&mut history)
+                    .max_turns(MAX_TOOL_TURNS)
+                    .await?
+            }
+            AgentProvider::OpenAI(agent) => {
+                agent
+                    .prompt(&prompt)
+                    .with_history(&mut history)
+                    .max_turns(MAX_TOOL_TURNS)
+                    .await?
+            }
+            AgentProvider::Ollama(agent) => {
+                agent
+                    .prompt(&prompt)
+                    .with_history(&mut history)
+                    .max_turns(MAX_TOOL_TURNS)
+                    .await?
+            }
+        };
+
+        // 6. Add agent response to working memory
         self.context_builder
             .working_memory_mut()
             .add_message(Message {
@@ -175,14 +258,14 @@ impl OwnAIAgent {
                 timestamp: Utc::now(),
             });
 
-        // 5. Save to database
+        // 7. Save to database
         self.save_message("user", user_message).await?;
         self.save_message("agent", &response).await?;
 
         Ok(response)
     }
 
-    /// Stream chat response with history
+    /// Stream chat response with tool support
     pub async fn stream_chat(
         &mut self,
         user_message: &str,
@@ -202,11 +285,10 @@ impl OwnAIAgent {
         let context = self.context_builder.build_context(user_message).await?;
 
         // 3. Convert working memory to rig messages for chat history
-        // Note: We skip the last message (current user message) as it will be sent separately
         let messages = self.context_builder.working_memory().get_context();
         let history: Vec<RigMessage> = messages
             .iter()
-            .take(messages.len().saturating_sub(1)) // Exclude last (current) message
+            .take(messages.len().saturating_sub(1))
             .map(|msg| {
                 if msg.role == "user" {
                     RigMessage::user(&msg.content)
@@ -216,27 +298,36 @@ impl OwnAIAgent {
             })
             .collect();
 
-        // 4. Prepare prompt: include context from long-term memory and summaries
+        // 4. Prepare prompt with memory context
         let prompt = if !context.is_empty() {
             format!("[Context from memory]\n{}\n\n{}", context, user_message)
         } else {
             user_message.to_string()
         };
 
-        // 5. Stream with chat history for proper conversation context
+        // 5. Stream with multi-turn tool calling support
         let mut full_response = String::new();
 
         match &self.agent {
             AgentProvider::Anthropic(agent) => {
-                let mut stream = agent.stream_chat(&prompt, history.clone()).await;
+                let mut stream = agent
+                    .stream_chat(&prompt, history)
+                    .multi_turn(MAX_TOOL_TURNS)
+                    .await;
                 process_stream!(stream, callback, full_response);
             }
             AgentProvider::OpenAI(agent) => {
-                let mut stream = agent.stream_chat(&prompt, history.clone()).await;
+                let mut stream = agent
+                    .stream_chat(&prompt, history)
+                    .multi_turn(MAX_TOOL_TURNS)
+                    .await;
                 process_stream!(stream, callback, full_response);
             }
             AgentProvider::Ollama(agent) => {
-                let mut stream = agent.stream_chat(&prompt, history).await;
+                let mut stream = agent
+                    .stream_chat(&prompt, history)
+                    .multi_turn(MAX_TOOL_TURNS)
+                    .await;
                 process_stream!(stream, callback, full_response);
             }
         }
@@ -258,45 +349,64 @@ impl OwnAIAgent {
         Ok(full_response)
     }
 
-    /// System prompt for ownAI
+    /// System prompt for ownAI -- includes tool usage instructions
     fn system_prompt(instance_name: &str) -> String {
-        format!(r#"You are {}, a personal AI agent that evolves with your user.
+        format!(
+            r#"You are {name}, a personal AI agent that evolves with your user.
 
 ## Core Identity
 
 You maintain a permanent, growing relationship with your user by:
 - Remembering everything important across all conversations
 - Learning and adapting to their preferences
-- Proactively improving yourself
+- Proactively improving yourself by creating new capabilities
 - Being helpful, concise, and honest
 
-## Your Capabilities
+## Available Tools
 
-**Memory System:**
-- You have access to long-term memories (semantic search)
-- Recent conversation summaries
-- Full working memory of recent messages
+You have access to the following tools:
 
-**When you see relevant context above:**
-- It comes from previous conversations
-- Use it naturally in your responses
-- Reference it when relevant
+### Filesystem (Workspace)
+- **ls**: List files and directories in your workspace
+- **read_file**: Read file contents (supports line ranges)
+- **write_file**: Write content to a file (creates dirs if needed)
+- **edit_file**: Replace text in a file (old_text -> new_text)
+- **grep**: Search for text patterns in files
+
+Use the workspace to:
+- Save research results, notes, or data
+- Create and manage files for the user
+- Offload large information from context
+
+### Planning
+- **write_todos**: Create/update a TODO list for multi-step tasks
+
+Use write_todos when:
+- A task requires more than 2-3 steps
+- You need to track progress on complex work
+- You discover new requirements mid-task
+
+## Memory System
+
+You have access to:
+- **Working Memory**: Recent messages in the current conversation
+- **Long-term Memory**: Important facts retrieved via semantic search
+- **Summaries**: Condensed older conversations
+
+When you see "[Context from memory]" above a message, that information
+comes from previous conversations. Use it naturally.
 
 ## Response Guidelines
 
 1. **Be conversational**: This is a continuous relationship, not isolated chats
-2. **Be proactive**: Suggest improvements when you see patterns
+2. **Use tools proactively**: Don't hesitate to use workspace or planning tools
 3. **Be honest**: Admit when you don't know something
 4. **Be adaptive**: Learn from user feedback and adjust your style
+5. **Plan before acting**: For complex tasks, create a TODO list first
 
-## Important Notes
-
-- You're in Phase 3: LLM Integration is complete!
-- Tool creation and advanced features coming in Phase 4
-- Focus on being helpful with current capabilities
-
-Remember: You're building a long-term relationship with this user."#,
-            instance_name)
+Remember: You are building a long-term relationship with this user."#,
+            name = instance_name
+        )
     }
 
     /// Helper: Save message to database
