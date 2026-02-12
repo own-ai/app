@@ -1,5 +1,4 @@
 use anyhow::Result;
-use sqlx::{Pool, Sqlite};
 
 use super::{LongTermMemory, SessionSummary, SummarizationAgent, WorkingMemory};
 
@@ -8,7 +7,6 @@ pub struct ContextBuilder {
     working_memory: WorkingMemory,
     long_term_memory: LongTermMemory,
     summarization_agent: SummarizationAgent,
-    db: Pool<Sqlite>,
 }
 
 impl ContextBuilder {
@@ -17,13 +15,11 @@ impl ContextBuilder {
         working_memory: WorkingMemory,
         long_term_memory: LongTermMemory,
         summarization_agent: SummarizationAgent,
-        db: Pool<Sqlite>,
     ) -> Self {
         Self {
             working_memory,
             long_term_memory,
             summarization_agent,
-            db,
         }
     }
     

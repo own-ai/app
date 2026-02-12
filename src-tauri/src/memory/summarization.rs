@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sqlx::{Pool, Row, Sqlite};
 
@@ -17,15 +18,20 @@ pub struct SessionSummary {
     pub token_savings: usize,
 }
 
-/// Response structure from LLM when summarizing
-#[derive(Debug, Deserialize)]
-struct SummaryResponse {
-    summary: String,
-    key_facts: Vec<String>,
+/// Structured response extracted from LLM when summarizing conversations.
+/// Used with rig Extractors for type-safe structured output.
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SummaryResponse {
+    /// Concise summary of the conversation
+    pub summary: String,
+    /// Key facts learned about the user or discussed topics
+    pub key_facts: Vec<String>,
+    /// Tools that were used or mentioned in the conversation
     #[serde(default)]
-    tools_used: Vec<String>,
+    pub tools_used: Vec<String>,
+    /// Main topics discussed in the conversation
     #[serde(default)]
-    topics: Vec<String>,
+    pub topics: Vec<String>,
 }
 
 /// Message structure for summarization
@@ -234,5 +240,266 @@ impl SummarizationAgent {
         let summary_tokens = original_tokens / 10;
         
         original_tokens.saturating_sub(summary_tokens)
+    }
+
+    /// Get total count of summaries in database
+    pub async fn count_summaries(&self) -> Result<i64> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM summaries")
+            .fetch_one(&self.db)
+            .await?;
+        Ok(count)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: create an in-memory SQLite database with the messages table
+    async fn setup_test_db() -> Pool<Sqlite> {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .expect("Failed to create in-memory database");
+
+        // Create messages table (needed for foreign keys)
+        sqlx::query(
+            r#"
+            CREATE TABLE messages (
+                id TEXT PRIMARY KEY,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                timestamp DATETIME NOT NULL,
+                metadata TEXT,
+                summary_id TEXT
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("Failed to create messages table");
+
+        pool
+    }
+
+    fn create_test_summary(id: &str) -> SessionSummary {
+        SessionSummary {
+            id: id.to_string(),
+            start_message_id: "msg_start".to_string(),
+            end_message_id: "msg_end".to_string(),
+            summary_text: "Test summary of a conversation about Rust programming.".to_string(),
+            key_facts: vec![
+                "User is learning Rust".to_string(),
+                "Discussed ownership and borrowing".to_string(),
+            ],
+            tools_mentioned: vec!["read_file".to_string()],
+            topics: vec!["Rust".to_string(), "Programming".to_string()],
+            timestamp: Utc::now(),
+            token_savings: 500,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_init_table() {
+        let db = setup_test_db().await;
+        let agent = SummarizationAgent::new(db);
+
+        let result = agent.init_table().await;
+        assert!(result.is_ok(), "init_table should succeed");
+    }
+
+    #[tokio::test]
+    async fn test_save_and_retrieve_summary() {
+        let db = setup_test_db().await;
+        let agent = SummarizationAgent::new(db);
+        agent.init_table().await.unwrap();
+
+        // Insert referenced messages first (for foreign key)
+        sqlx::query("INSERT INTO messages (id, role, content, timestamp) VALUES (?, ?, ?, ?)")
+            .bind("msg_start")
+            .bind("user")
+            .bind("Hello")
+            .bind(Utc::now())
+            .execute(&agent.db)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO messages (id, role, content, timestamp) VALUES (?, ?, ?, ?)")
+            .bind("msg_end")
+            .bind("agent")
+            .bind("Hi there!")
+            .bind(Utc::now())
+            .execute(&agent.db)
+            .await
+            .unwrap();
+
+        // Save summary
+        let summary = create_test_summary("summary_1");
+        agent.save_summary(&summary).await.unwrap();
+
+        // Retrieve
+        let summaries = agent.get_recent_summaries(10).await.unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, "summary_1");
+        assert_eq!(
+            summaries[0].summary_text,
+            "Test summary of a conversation about Rust programming."
+        );
+        assert_eq!(summaries[0].key_facts.len(), 2);
+        assert_eq!(summaries[0].tools_mentioned, vec!["read_file"]);
+        assert_eq!(summaries[0].topics, vec!["Rust", "Programming"]);
+        assert_eq!(summaries[0].token_savings, 500);
+    }
+
+    #[tokio::test]
+    async fn test_count_summaries() {
+        let db = setup_test_db().await;
+        let agent = SummarizationAgent::new(db);
+        agent.init_table().await.unwrap();
+
+        // Insert referenced messages
+        for id in ["msg_start", "msg_end", "msg_start2", "msg_end2"] {
+            sqlx::query("INSERT INTO messages (id, role, content, timestamp) VALUES (?, ?, ?, ?)")
+                .bind(id)
+                .bind("user")
+                .bind("content")
+                .bind(Utc::now())
+                .execute(&agent.db)
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(agent.count_summaries().await.unwrap(), 0);
+
+        agent
+            .save_summary(&create_test_summary("s1"))
+            .await
+            .unwrap();
+        assert_eq!(agent.count_summaries().await.unwrap(), 1);
+
+        let mut s2 = create_test_summary("s2");
+        s2.start_message_id = "msg_start2".to_string();
+        s2.end_message_id = "msg_end2".to_string();
+        agent.save_summary(&s2).await.unwrap();
+        assert_eq!(agent.count_summaries().await.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_link_messages_to_summary() {
+        let db = setup_test_db().await;
+        let agent = SummarizationAgent::new(db);
+        agent.init_table().await.unwrap();
+
+        // Create messages
+        let msg_ids: Vec<String> = (0..3).map(|i| format!("msg_{}", i)).collect();
+        for id in &msg_ids {
+            sqlx::query("INSERT INTO messages (id, role, content, timestamp) VALUES (?, ?, ?, ?)")
+                .bind(id)
+                .bind("user")
+                .bind("test content")
+                .bind(Utc::now())
+                .execute(&agent.db)
+                .await
+                .unwrap();
+        }
+
+        // Save summary
+        let mut summary = create_test_summary("sum_1");
+        summary.start_message_id = msg_ids[0].clone();
+        summary.end_message_id = msg_ids[2].clone();
+        agent.save_summary(&summary).await.unwrap();
+
+        // Link messages
+        agent
+            .link_messages_to_summary(&msg_ids, "sum_1")
+            .await
+            .unwrap();
+
+        // Verify links
+        let linked: Vec<(String,)> =
+            sqlx::query_as("SELECT summary_id FROM messages WHERE summary_id IS NOT NULL")
+                .fetch_all(&agent.db)
+                .await
+                .unwrap();
+
+        assert_eq!(linked.len(), 3);
+        for (sid,) in &linked {
+            assert_eq!(sid, "sum_1");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_recent_summaries_ordering() {
+        let db = setup_test_db().await;
+        let agent = SummarizationAgent::new(db);
+        agent.init_table().await.unwrap();
+
+        // Create messages for foreign keys
+        for i in 0..6 {
+            sqlx::query("INSERT INTO messages (id, role, content, timestamp) VALUES (?, ?, ?, ?)")
+                .bind(format!("m{}", i))
+                .bind("user")
+                .bind("content")
+                .bind(Utc::now())
+                .execute(&agent.db)
+                .await
+                .unwrap();
+        }
+
+        // Save 3 summaries
+        for i in 0..3 {
+            let mut s = create_test_summary(&format!("s{}", i));
+            s.start_message_id = format!("m{}", i * 2);
+            s.end_message_id = format!("m{}", i * 2 + 1);
+            s.summary_text = format!("Summary {}", i);
+            // Small delay to ensure different timestamps
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            agent.save_summary(&s).await.unwrap();
+        }
+
+        // Get with limit 2 -> should return the 2 most recent
+        let summaries = agent.get_recent_summaries(2).await.unwrap();
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].summary_text, "Summary 2"); // Most recent first
+        assert_eq!(summaries[1].summary_text, "Summary 1");
+    }
+
+    #[tokio::test]
+    async fn test_summarize_messages_basic() {
+        let db = setup_test_db().await;
+        let agent = SummarizationAgent::new(db);
+
+        let messages = vec![
+            Message {
+                id: "m1".to_string(),
+                role: "user".to_string(),
+                content: "Hello, I need help with Rust.".to_string(),
+            },
+            Message {
+                id: "m2".to_string(),
+                role: "agent".to_string(),
+                content: "Sure, what do you need help with?".to_string(),
+            },
+            Message {
+                id: "m3".to_string(),
+                role: "user".to_string(),
+                content: "How does ownership work?".to_string(),
+            },
+        ];
+
+        let summary = agent.summarize_messages(&messages).await.unwrap();
+
+        assert_eq!(summary.start_message_id, "m1");
+        assert_eq!(summary.end_message_id, "m3");
+        assert!(!summary.summary_text.is_empty());
+        assert!(summary.token_savings > 0);
+    }
+
+    #[tokio::test]
+    async fn test_summarize_empty_messages_fails() {
+        let db = setup_test_db().await;
+        let agent = SummarizationAgent::new(db);
+
+        let result = agent.summarize_messages(&[]).await;
+        assert!(result.is_err());
     }
 }

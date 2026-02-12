@@ -49,9 +49,7 @@ pub fn run() {
             commands::chat::stream_message,
             commands::chat::load_messages,
             commands::chat::clear_agent_cache,
-            // Memory Testing (keep for now)
-            commands::memory::test_store_memory,
-            commands::memory::test_recall_memories,
+            // Memory
             commands::memory::get_memory_stats,
         ])
         .run(tauri::generate_context!())

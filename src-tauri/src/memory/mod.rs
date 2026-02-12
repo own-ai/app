@@ -5,5 +5,5 @@ pub mod working_memory;
 
 pub use context_builder::ContextBuilder;
 pub use long_term::{LongTermMemory, MemoryEntry, MemoryType};
-pub use summarization::{SessionSummary, SummarizationAgent};
+pub use summarization::{SessionSummary, SummarizationAgent, SummaryResponse};
 pub use working_memory::WorkingMemory;

@@ -4,6 +4,7 @@ use futures::StreamExt;
 use rig::agent::{Agent, MultiTurnStreamItem};
 use rig::client::{CompletionClient, Nothing};
 use rig::completion::Prompt;
+use rig::extractor::Extractor;
 use rig::message::Message as RigMessage;
 use rig::providers::{anthropic, ollama, openai};
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
@@ -13,7 +14,8 @@ use std::path::PathBuf;
 
 use crate::ai_instances::{AIInstance, APIKeyStorage, LLMProvider};
 use crate::memory::{
-    working_memory::Message, ContextBuilder, LongTermMemory, SummarizationAgent, WorkingMemory,
+    working_memory::Message, ContextBuilder, LongTermMemory, SessionSummary, SummarizationAgent,
+    SummaryResponse, WorkingMemory,
 };
 use crate::tools::filesystem::{EditFileTool, GrepTool, LsTool, ReadFileTool, WriteFileTool};
 use crate::tools::planning::{self, SharedTodoList, WriteTodosTool};
@@ -77,9 +79,29 @@ enum AgentProvider {
     Ollama(Agent<ollama::CompletionModel>),
 }
 
+/// Provider-specific extractor for structured summary extraction from LLM.
+/// Uses rig Extractors for type-safe structured output via tool-based extraction.
+enum SummaryExtractorProvider {
+    Anthropic(Extractor<anthropic::completion::CompletionModel, SummaryResponse>),
+    OpenAI(Extractor<openai::CompletionModel, SummaryResponse>),
+    Ollama(Extractor<ollama::CompletionModel, SummaryResponse>),
+}
+
+impl SummaryExtractorProvider {
+    /// Extract a structured summary from the given text
+    async fn extract(&self, text: &str) -> Result<SummaryResponse> {
+        match self {
+            Self::Anthropic(e) => Ok(e.extract(text).await?),
+            Self::OpenAI(e) => Ok(e.extract(text).await?),
+            Self::Ollama(e) => Ok(e.extract(text).await?),
+        }
+    }
+}
+
 /// OwnAI Agent with Memory, Tools, and LLM integration
 pub struct OwnAIAgent {
     agent: AgentProvider,
+    summary_extractor: SummaryExtractorProvider,
     context_builder: ContextBuilder,
     db: Pool<Sqlite>,
     #[allow(dead_code)]
@@ -90,10 +112,15 @@ pub struct OwnAIAgent {
 const MAX_TOOL_TURNS: usize = 50;
 
 impl OwnAIAgent {
-    /// Create a new OwnAI Agent with tools
-    pub async fn new(instance: &AIInstance, db: Pool<Sqlite>) -> Result<Self> {
+    /// Create a new OwnAI Agent with tools.
+    /// `max_tokens` allows overriding the default working memory budget (50k tokens).
+    pub async fn new(
+        instance: &AIInstance,
+        db: Pool<Sqlite>,
+        max_tokens: Option<usize>,
+    ) -> Result<Self> {
         // Initialize Memory System components
-        let working_memory = WorkingMemory::new(50_000); // 50k tokens
+        let working_memory = WorkingMemory::new(max_tokens.unwrap_or(50_000));
         let long_term_memory = LongTermMemory::new(db.clone()).await?;
         let summarization_agent = SummarizationAgent::new(db.clone());
 
@@ -104,7 +131,6 @@ impl OwnAIAgent {
             working_memory,
             long_term_memory,
             summarization_agent,
-            db.clone(),
         );
 
         // Create shared TODO list state
@@ -119,9 +145,12 @@ impl OwnAIAgent {
         };
 
         let system_prompt = Self::system_prompt(&instance.name);
+        let extractor_preamble = "Extract a structured summary from the conversation below. \
+            Identify the key facts discussed, any tools that were used or mentioned, \
+            and the main topics covered. Be concise but thorough.";
 
-        // Create provider-specific agent with tools
-        let agent = match instance.provider {
+        // Create provider-specific agent with tools and summary extractor
+        let (agent, summary_extractor) = match instance.provider {
             LLMProvider::Anthropic => {
                 let client = anthropic::Client::builder()
                     .api_key(&api_key)
@@ -132,11 +161,21 @@ impl OwnAIAgent {
                 let agent = client
                     .agent(&instance.model)
                     .preamble(&system_prompt)
+                    .max_tokens(32768)
                     .temperature(0.7)
                     .tools(tools)
                     .build();
 
-                AgentProvider::Anthropic(agent)
+                let extractor = client
+                    .extractor::<SummaryResponse>(&instance.model)
+                    .preamble(extractor_preamble)
+                    .max_tokens(8192)
+                    .build();
+
+                (
+                    AgentProvider::Anthropic(agent),
+                    SummaryExtractorProvider::Anthropic(extractor),
+                )
             }
 
             LLMProvider::OpenAI => {
@@ -147,6 +186,7 @@ impl OwnAIAgent {
                 let tools = create_tools(&instance.id, todo_list.clone());
 
                 let agent = openai_client
+                    .clone()
                     .completions_api()
                     .agent(&instance.model)
                     .preamble(&system_prompt)
@@ -154,7 +194,16 @@ impl OwnAIAgent {
                     .tools(tools)
                     .build();
 
-                AgentProvider::OpenAI(agent)
+                let extractor = openai_client
+                    .completions_api()
+                    .extractor::<SummaryResponse>(&instance.model)
+                    .preamble(extractor_preamble)
+                    .build();
+
+                (
+                    AgentProvider::OpenAI(agent),
+                    SummaryExtractorProvider::OpenAI(extractor),
+                )
             }
 
             LLMProvider::Ollama => {
@@ -175,34 +224,117 @@ impl OwnAIAgent {
                     .tools(tools)
                     .build();
 
-                AgentProvider::Ollama(agent)
+                let extractor = ollama_client
+                    .extractor::<SummaryResponse>(&instance.model)
+                    .preamble(extractor_preamble)
+                    .build();
+
+                (
+                    AgentProvider::Ollama(agent),
+                    SummaryExtractorProvider::Ollama(extractor),
+                )
             }
         };
 
         Ok(OwnAIAgent {
             agent,
+            summary_extractor,
             context_builder,
             db,
             todo_list,
         })
     }
 
+    /// Public accessor for context builder (used by memory stats command)
+    pub fn context_builder(&self) -> &ContextBuilder {
+        &self.context_builder
+    }
+
+    /// Summarize evicted messages using the LLM extractor and save to database.
+    /// Called automatically when working memory exceeds its token budget.
+    async fn summarize_evicted(&self, evicted: Vec<Message>) -> Result<()> {
+        if evicted.is_empty() {
+            return Ok(());
+        }
+
+        tracing::info!(
+            "Summarizing {} evicted messages via LLM extractor",
+            evicted.len()
+        );
+
+        // Format messages for the extractor
+        let conversation_text = evicted
+            .iter()
+            .map(|m| format!("{}: {}", m.role, m.content))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Use rig Extractor for type-safe structured output
+        let extracted = self.summary_extractor.extract(&conversation_text).await?;
+
+        // Build SessionSummary from extracted data
+        let summary = SessionSummary {
+            id: uuid::Uuid::new_v4().to_string(),
+            start_message_id: evicted.first().unwrap().id.clone(),
+            end_message_id: evicted.last().unwrap().id.clone(),
+            summary_text: extracted.summary,
+            key_facts: extracted.key_facts,
+            tools_mentioned: extracted.tools_used,
+            topics: extracted.topics,
+            timestamp: Utc::now(),
+            token_savings: evicted
+                .iter()
+                .map(|m| (m.content.len() + m.role.len()) / 4)
+                .sum(),
+        };
+
+        // Save summary and link messages
+        let summarization_agent = self.context_builder.summarization_agent();
+        summarization_agent.save_summary(&summary).await?;
+
+        let message_ids: Vec<String> = evicted.iter().map(|m| m.id.clone()).collect();
+        summarization_agent
+            .link_messages_to_summary(&message_ids, &summary.id)
+            .await?;
+
+        tracing::info!(
+            "Saved LLM summary {} for {} messages (saved ~{} tokens)",
+            summary.id,
+            evicted.len(),
+            summary.token_savings
+        );
+
+        Ok(())
+    }
+
+    /// Add a message to working memory; if eviction occurs, summarize in background
+    async fn add_to_working_memory(&mut self, msg: Message) {
+        if let Some(evicted) = self.context_builder.working_memory_mut().add_message(msg) {
+            if let Err(e) = self.summarize_evicted(evicted).await {
+                tracing::warn!("Failed to summarize evicted messages: {}", e);
+            }
+        }
+    }
+
     /// Main chat method (non-streaming) - combines Memory + Tools + LLM
     pub async fn chat(&mut self, user_message: &str) -> Result<String> {
-        // 1. Add user message to working memory
-        self.context_builder
-            .working_memory_mut()
-            .add_message(Message {
-                id: uuid::Uuid::new_v4().to_string(),
-                role: "user".to_string(),
-                content: user_message.to_string(),
-                timestamp: Utc::now(),
-            });
+        // 1. Create user message, save to DB first (so FK constraints work for summaries)
+        let user_msg = Message {
+            id: uuid::Uuid::new_v4().to_string(),
+            role: "user".to_string(),
+            content: user_message.to_string(),
+            timestamp: Utc::now(),
+        };
+        self.save_message_with_id(&user_msg.id, &user_msg.role, &user_msg.content)
+            .await?;
 
-        // 2. Build context from all memory layers
+        // 2. Add to working memory (may trigger eviction -> summarization)
+        self.add_to_working_memory(user_msg).await;
+
+        // 3. Build context from all memory layers
         let context = self.context_builder.build_context(user_message).await?;
 
-        // 3. Build chat history from working memory
+        // 4. Build chat history from working memory
         let messages = self.context_builder.working_memory().get_context();
         let mut history: Vec<RigMessage> = messages
             .iter()
@@ -216,14 +348,14 @@ impl OwnAIAgent {
             })
             .collect();
 
-        // 4. Prepare prompt with memory context
+        // 5. Prepare prompt with memory context
         let prompt = if !context.is_empty() {
             format!("[Context from memory]\n{}\n\n{}", context, user_message)
         } else {
             user_message.to_string()
         };
 
-        // 5. Call LLM with multi-turn tool support
+        // 6. Call LLM with multi-turn tool support
         let response = match &self.agent {
             AgentProvider::Anthropic(agent) => {
                 agent
@@ -248,19 +380,16 @@ impl OwnAIAgent {
             }
         };
 
-        // 6. Add agent response to working memory
-        self.context_builder
-            .working_memory_mut()
-            .add_message(Message {
-                id: uuid::Uuid::new_v4().to_string(),
-                role: "agent".to_string(),
-                content: response.clone(),
-                timestamp: Utc::now(),
-            });
-
-        // 7. Save to database
-        self.save_message("user", user_message).await?;
-        self.save_message("agent", &response).await?;
+        // 7. Save agent response to DB first, then add to working memory
+        let agent_msg = Message {
+            id: uuid::Uuid::new_v4().to_string(),
+            role: "agent".to_string(),
+            content: response.clone(),
+            timestamp: Utc::now(),
+        };
+        self.save_message_with_id(&agent_msg.id, &agent_msg.role, &agent_msg.content)
+            .await?;
+        self.add_to_working_memory(agent_msg).await;
 
         Ok(response)
     }
@@ -271,15 +400,16 @@ impl OwnAIAgent {
         user_message: &str,
         mut callback: impl FnMut(String) + Send + 'static,
     ) -> Result<String> {
-        // 1. Add user message to working memory
-        self.context_builder
-            .working_memory_mut()
-            .add_message(Message {
-                id: uuid::Uuid::new_v4().to_string(),
-                role: "user".to_string(),
-                content: user_message.to_string(),
-                timestamp: Utc::now(),
-            });
+        // 1. Save user message to DB first, then add to working memory
+        let user_msg = Message {
+            id: uuid::Uuid::new_v4().to_string(),
+            role: "user".to_string(),
+            content: user_message.to_string(),
+            timestamp: Utc::now(),
+        };
+        self.save_message_with_id(&user_msg.id, &user_msg.role, &user_msg.content)
+            .await?;
+        self.add_to_working_memory(user_msg).await;
 
         // 2. Build context
         let context = self.context_builder.build_context(user_message).await?;
@@ -332,19 +462,16 @@ impl OwnAIAgent {
             }
         }
 
-        // 6. Add response to memory
-        self.context_builder
-            .working_memory_mut()
-            .add_message(Message {
-                id: uuid::Uuid::new_v4().to_string(),
-                role: "agent".to_string(),
-                content: full_response.clone(),
-                timestamp: Utc::now(),
-            });
-
-        // 7. Save to database
-        self.save_message("user", user_message).await?;
-        self.save_message("agent", &full_response).await?;
+        // 6. Save agent response to DB first, then add to working memory
+        let agent_msg = Message {
+            id: uuid::Uuid::new_v4().to_string(),
+            role: "agent".to_string(),
+            content: full_response.clone(),
+            timestamp: Utc::now(),
+        };
+        self.save_message_with_id(&agent_msg.id, &agent_msg.role, &agent_msg.content)
+            .await?;
+        self.add_to_working_memory(agent_msg).await;
 
         Ok(full_response)
     }
@@ -409,13 +536,15 @@ Remember: You are building a long-term relationship with this user."#,
         )
     }
 
-    /// Helper: Save message to database
-    async fn save_message(&self, role: &str, content: &str) -> Result<()> {
+    /// Helper: Save message to database with a specific ID.
+    /// This ensures the same ID is used in both the DB and working memory,
+    /// so that FOREIGN KEY constraints in summaries work correctly.
+    async fn save_message_with_id(&self, id: &str, role: &str, content: &str) -> Result<()> {
         sqlx::query(
             "INSERT INTO messages (id, role, content, timestamp) 
              VALUES (?, ?, ?, ?)",
         )
-        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(id)
         .bind(role)
         .bind(content)
         .bind(Utc::now())

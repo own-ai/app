@@ -52,7 +52,7 @@ pub async fn send_message(
             .map_err(|e| format!("Failed to initialize database: {}", e))?;
 
         // Create new agent
-        let agent = OwnAIAgent::new(&instance, db)
+        let agent = OwnAIAgent::new(&instance, db, None)
             .await
             .map_err(|e| format!("Failed to create agent: {}", e))?;
 
@@ -113,7 +113,7 @@ pub async fn stream_message(
             .map_err(|e| format!("Failed to initialize database: {}", e))?;
 
         // Create new agent
-        let agent = OwnAIAgent::new(&instance, db)
+        let agent = OwnAIAgent::new(&instance, db, None)
             .await
             .map_err(|e| format!("Failed to create agent: {}", e))?;
 
