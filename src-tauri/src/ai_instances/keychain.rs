@@ -79,7 +79,7 @@ mod tests {
         // Save - skip test if no keyring service available (e.g., in CI)
         match APIKeyStorage::save(&provider, api_key) {
             Err(e) => {
-                let error_msg = e.to_string();
+                let error_msg = format!("{:?}", e);
                 if error_msg.contains("Platform secure storage failure")
                     || error_msg.contains("org.freedesktop.secrets")
                 {
