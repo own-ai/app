@@ -76,8 +76,20 @@ mod tests {
         let provider = LLMProvider::Anthropic;
         let api_key = "test-api-key-secret";
 
-        // Save
-        APIKeyStorage::save(&provider, api_key).unwrap();
+        // Save - skip test if no keyring service available (e.g., in CI)
+        match APIKeyStorage::save(&provider, api_key) {
+            Err(e) => {
+                let error_msg = e.to_string();
+                if error_msg.contains("Platform secure storage failure")
+                    || error_msg.contains("org.freedesktop.secrets")
+                {
+                    eprintln!("Skipping test: no keyring service available ({})", e);
+                    return;
+                }
+                panic!("Unexpected error during save: {}", e);
+            }
+            Ok(_) => {}
+        }
 
         // Load
         let loaded = APIKeyStorage::load(&provider).unwrap();
