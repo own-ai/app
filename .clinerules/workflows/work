@@ -1,0 +1,218 @@
+# Development Workflow
+
+This workflow defines the iterative development process for ownAI. Follow these steps for each work session to ensure consistent progress, proper testing, and documentation updates.
+
+## Workflow Steps
+
+### 1. Read Context (PLAN MODE)
+
+**Before starting any work**, read ALL of the following files to understand the current state:
+
+- `.clinerules/memory-bank/projectbrief.md` - Project vision and requirements
+- `.clinerules/memory-bank/productContext.md` - Why the project exists, problems it solves
+- `.clinerules/memory-bank/systemPatterns.md` - Architecture and design patterns
+- `.clinerules/memory-bank/techContext.md` - Technology stack and setup
+- `.clinerules/memory-bank/activeContext.md` - Current work focus and recent changes
+- `.clinerules/memory-bank/progress.md` - What works and what's left to build
+- `implementation_plan.md` - Detailed implementation plan with phases and steps
+
+**This is mandatory** - the Memory Bank is your only link to previous work.
+
+### 2. Identify Next Work Package (PLAN MODE)
+
+Based on the `implementation_plan.md`, identify the next logical work package:
+
+- **Choose a reasonable scope**: 1-3 related steps from the implementation order
+- **Check dependencies**: Ensure prerequisites are complete (refer to `progress.md`)
+- **Consider complexity**: Balance ambition with deliverability
+- **Prioritize completion**: Finish Phase 2 before Phase 3, etc.
+
+**Examples of good work packages:**
+- "Fix context duplication and add importance scoring" (Phase 2, steps 1-2)
+- "Create sandboxed Rhai engine and Tool Registry" (Phase 3, steps 6-7)
+- "Canvas System backend and custom protocol" (Phase 4, steps 12-13)
+
+### 3. Create Detailed Implementation Plan (PLAN MODE)
+
+For the chosen work package, create a detailed plan including:
+
+**Files to modify or create:**
+- List each file path
+- Describe what changes will be made
+- Note any new types, functions, or tests
+
+**Implementation sequence:**
+- Order the changes logically (types → functions → tests → integration)
+- Identify which changes can be done in parallel vs. sequentially
+
+**Testing approach:**
+- Unit tests to add or modify
+- Integration tests needed
+- Manual verification steps
+
+**Expected outcome:**
+- What should work after this package is complete
+- How to verify success (commands to run, behavior to observe)
+
+### 4. Present Plan and Request Act Mode (PLAN MODE)
+
+Use `plan_mode_respond` to present the detailed plan to the user. Include:
+
+- Summary of the work package
+- Files affected
+- Key changes
+- Testing approach
+- Expected outcome
+
+**End with:** "Please toggle to Act mode so I can implement this package."
+
+### 5. Implement the Package (ACT MODE)
+
+Once the user switches to Act Mode:
+
+**Follow the plan sequentially:**
+- Create or modify files as outlined
+- Add types first, then functions, then tests
+- Make atomic, logical changes
+- Write clear code following project conventions (see `AGENTS.md`)
+
+**Development best practices:**
+- Follow Rust naming conventions (snake_case functions, PascalCase types)
+- Use `anyhow::Result` for error handling
+- Add `#[cfg(test)]` module for unit tests
+- Use existing patterns from the codebase
+- No emojis anywhere in code or comments
+- All UI text through i18n system
+
+### 6. Verify Build and Tests (ACT MODE)
+
+After implementation, verify everything works:
+
+**Run these commands:**
+```bash
+# Check Rust compilation
+cd src-tauri
+cargo build
+
+# Run all tests
+cargo test
+
+# Run linter
+cargo clippy
+
+# Format code
+cargo fmt
+
+# Check frontend if frontend changes were made
+cd ..
+pnpm tsc --noEmit
+```
+
+**Fix any errors before proceeding.** Do not update documentation if the build fails.
+
+**If the build succeeds:**
+- Note any warnings from clippy (fix if critical)
+- Confirm all existing tests still pass
+- Confirm new tests pass (if added)
+
+### 7. Update Documentation (ACT MODE)
+
+Once the build and tests succeed, update the following files:
+
+#### Update `implementation_plan.md`:
+- Mark completed steps with `[x]` in the Implementation Order section
+- Update the overview if a phase is now complete
+- Add any learnings or deviations from the original plan
+
+#### Update `.clinerules/memory-bank/activeContext.md`:
+- Add the completed work to "Recent Changes"
+- Update "Current Work Focus" to reflect new state
+- Update "Next Steps" based on remaining work
+- Add any important decisions or patterns discovered
+
+#### Update `.clinerules/memory-bank/progress.md`:
+- Move completed items from "What's Left to Build" to "What Works"
+- Update phase completion status
+- Add any new known issues discovered
+- Document any evolution of project decisions
+
+Also update the remaining memory bank files if relevant (e.g. `systemPatterns.md` if new patterns were used).
+
+**Keep updates concise** - focus on meaningful changes, not implementation details.
+
+### 8. Inform User and Complete (ACT MODE)
+
+Use `attempt_completion` to summarize what was accomplished:
+
+- Brief summary (1-2 paragraphs)
+- What was implemented
+- What was tested
+- What documentation was updated
+- Suggested next steps
+
+**Do NOT** include the full task_progress checklist in the result - it should be in the task_progress parameter.
+
+## Workflow Principles
+
+### When to Deviate from the Plan
+
+The `implementation_plan.md` is a guide, not a rigid specification. Deviate when:
+
+- You discover a better approach during implementation
+- Dependencies are unclear or missing
+- The original plan has gaps or errors
+- New information changes priorities
+
+**Always document deviations** in Memory Bank updates.
+
+### When to Ask Questions
+
+If during PLAN MODE you encounter:
+
+- Unclear requirements
+- Missing information
+- Multiple valid approaches with tradeoffs
+- Potential breaking changes
+
+**Use `ask_followup_question`** to clarify before proceeding to Act Mode.
+
+### Incremental Progress
+
+**Prefer smaller, complete packages over large, incomplete ones:**
+
+- It's better to fully complete Phase 2 Step 1 than to half-finish Steps 1-3
+- Each package should leave the codebase in a working state
+- Tests should pass after every package
+- Documentation should always be current
+
+### Memory Bank Integrity
+
+The Memory Bank is **critical** for continuity. Update it:
+
+- After every significant implementation package
+- When discovering new patterns or decisions
+- When the project state changes materially
+
+**Never skip Memory Bank updates** - future sessions depend on it.
+
+## Workflow Checklist
+
+Use this checklist for each work session:
+
+- [ ] Read all Memory Bank files
+- [ ] Read implementation_plan.md
+- [ ] Identify next work package (1-3 steps)
+- [ ] Create detailed implementation plan
+- [ ] Present plan to user (PLAN MODE → ACT MODE transition)
+- [ ] Implement changes following the plan
+- [ ] Run `cargo build` and verify success
+- [ ] Run `cargo test` and verify all tests pass
+- [ ] Run `cargo clippy` and address critical warnings
+- [ ] Update `implementation_plan.md` with completed steps
+- [ ] Update `activeContext.md` with recent changes and next steps
+- [ ] Update `progress.md` with what works now
+- [ ] Use `attempt_completion` with summary
+
+---
+
+**Remember:** This workflow ensures steady, documented progress. Each session builds on the last through the Memory Bank. Quality over speed, completeness over breadth.
