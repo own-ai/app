@@ -11,23 +11,23 @@ impl APIKeyStorage {
     /// Save API key to OS keychain
     pub fn save(provider: &LLMProvider, api_key: &str) -> Result<()> {
         let username = provider.to_string();
-        let entry = Entry::new(SERVICE_NAME, &username)
-            .context("Failed to create keychain entry")?;
-        
+        let entry =
+            Entry::new(SERVICE_NAME, &username).context("Failed to create keychain entry")?;
+
         entry
             .set_password(api_key)
             .context("Failed to save API key to keychain")?;
-        
+
         tracing::info!("Saved API key to keychain for provider: {}", provider);
-        
+
         Ok(())
     }
 
     /// Load API key from OS keychain
     pub fn load(provider: &LLMProvider) -> Result<Option<String>> {
         let username = provider.to_string();
-        let entry = Entry::new(SERVICE_NAME, &username)
-            .context("Failed to create keychain entry")?;
+        let entry =
+            Entry::new(SERVICE_NAME, &username).context("Failed to create keychain entry")?;
 
         match entry.get_password() {
             Ok(key) => {
@@ -45,8 +45,8 @@ impl APIKeyStorage {
     /// Delete API key from OS keychain
     pub fn delete(provider: &LLMProvider) -> Result<()> {
         let username = provider.to_string();
-        let entry = Entry::new(SERVICE_NAME, &username)
-            .context("Failed to create keychain entry")?;
+        let entry =
+            Entry::new(SERVICE_NAME, &username).context("Failed to create keychain entry")?;
 
         match entry.delete_credential() {
             Ok(_) => {

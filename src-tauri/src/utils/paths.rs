@@ -6,19 +6,17 @@ pub fn get_app_dir() -> Result<PathBuf> {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .context("Failed to determine home directory")?;
-    
+
     let path = PathBuf::from(home).join(".ownai");
-    std::fs::create_dir_all(&path)
-        .context("Failed to create .ownai directory")?;
-    
+    std::fs::create_dir_all(&path).context("Failed to create .ownai directory")?;
+
     Ok(path)
 }
 
 /// Get the instances directory (~/.ownai/instances)
 pub fn get_instances_path() -> Result<PathBuf> {
     let path = get_app_dir()?.join("instances");
-    std::fs::create_dir_all(&path)
-        .context("Failed to create instances directory")?;
+    std::fs::create_dir_all(&path).context("Failed to create instances directory")?;
     Ok(path)
 }
 
@@ -35,15 +33,13 @@ pub fn get_instance_db_path(instance_id: &str) -> Result<PathBuf> {
 /// Get the tools directory for a specific instance
 pub fn get_instance_tools_path(instance_id: &str) -> Result<PathBuf> {
     let path = get_instances_path()?.join(instance_id).join("tools");
-    std::fs::create_dir_all(&path)
-        .context("Failed to create tools directory")?;
+    std::fs::create_dir_all(&path).context("Failed to create tools directory")?;
     Ok(path)
 }
 
 /// Get the workspace directory for a specific instance
 pub fn get_instance_workspace_path(instance_id: &str) -> Result<PathBuf> {
     let path = get_instances_path()?.join(instance_id).join("workspace");
-    std::fs::create_dir_all(&path)
-        .context("Failed to create workspace directory")?;
+    std::fs::create_dir_all(&path).context("Failed to create workspace directory")?;
     Ok(path)
 }

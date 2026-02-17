@@ -15,8 +15,8 @@
 //! ```
 
 use chrono::Utc;
-use ownai_lib::ai_instances::{AIInstance, APIKeyStorage, LLMProvider};
 use ownai_lib::agent::OwnAIAgent;
+use ownai_lib::ai_instances::{AIInstance, APIKeyStorage, LLMProvider};
 use ownai_lib::database::schema;
 use sqlx::sqlite::SqlitePool;
 
@@ -87,7 +87,10 @@ fn setup_api_key(provider: &LLMProvider) -> bool {
 
     // Check if key already exists in keychain
     if let Ok(Some(_)) = APIKeyStorage::load(provider) {
-        println!("API key already in keychain for {:?}, using existing key.", provider);
+        println!(
+            "API key already in keychain for {:?}, using existing key.",
+            provider
+        );
         return false; // Don't clean up - it was already there
     }
 
@@ -173,24 +176,19 @@ async fn test_summarization_pipeline_with_llm() {
     // Note: This assertion may be soft depending on model response length
     if summary_count > 0 {
         // Verify summary content is meaningful
-        let summary_text: String =
-            sqlx::query_scalar("SELECT summary_text FROM summaries LIMIT 1")
-                .fetch_one(&db)
-                .await
-                .unwrap();
+        let summary_text: String = sqlx::query_scalar("SELECT summary_text FROM summaries LIMIT 1")
+            .fetch_one(&db)
+            .await
+            .unwrap();
 
         println!("First summary: {}", summary_text);
-        assert!(
-            !summary_text.is_empty(),
-            "Summary text should not be empty"
-        );
+        assert!(!summary_text.is_empty(), "Summary text should not be empty");
 
         // Check that key_facts were extracted
-        let key_facts_json: String =
-            sqlx::query_scalar("SELECT key_facts FROM summaries LIMIT 1")
-                .fetch_one(&db)
-                .await
-                .unwrap();
+        let key_facts_json: String = sqlx::query_scalar("SELECT key_facts FROM summaries LIMIT 1")
+            .fetch_one(&db)
+            .await
+            .unwrap();
 
         let key_facts: Vec<String> =
             serde_json::from_str(&key_facts_json).expect("key_facts should be valid JSON");
@@ -239,7 +237,11 @@ async fn test_agent_creation() {
 
     let agent = OwnAIAgent::new(&instance, db, None).await;
 
-    assert!(agent.is_ok(), "Agent creation should succeed: {:?}", agent.err());
+    assert!(
+        agent.is_ok(),
+        "Agent creation should succeed: {:?}",
+        agent.err()
+    );
 
     println!("Agent created successfully.");
 

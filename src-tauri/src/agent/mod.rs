@@ -54,8 +54,8 @@ macro_rules! process_stream {
 
 /// Helper: Create the set of tools for an instance
 fn create_tools(instance_id: &str, todo_list: SharedTodoList) -> Vec<Box<dyn ToolDyn>> {
-    let workspace = paths::get_instance_workspace_path(instance_id)
-        .unwrap_or_else(|_| PathBuf::from("."));
+    let workspace =
+        paths::get_instance_workspace_path(instance_id).unwrap_or_else(|_| PathBuf::from("."));
 
     let tools: Vec<Box<dyn ToolDyn>> = vec![
         // Filesystem tools
@@ -133,19 +133,17 @@ impl OwnAIAgent {
             working_memory.load_from_messages(recent_messages);
         }
 
-        let context_builder = ContextBuilder::new(
-            working_memory,
-            long_term_memory,
-            summarization_agent,
-        );
+        let context_builder =
+            ContextBuilder::new(working_memory, long_term_memory, summarization_agent);
 
         // Create shared TODO list state
         let todo_list = planning::create_shared_todo_list();
 
         // Load API key from keychain if needed
         let api_key = if instance.provider.needs_api_key() {
-            APIKeyStorage::load(&instance.provider)?
-                .ok_or_else(|| anyhow::anyhow!("API key not found for provider: {}", instance.provider))?
+            APIKeyStorage::load(&instance.provider)?.ok_or_else(|| {
+                anyhow::anyhow!("API key not found for provider: {}", instance.provider)
+            })?
         } else {
             String::new()
         };
@@ -158,9 +156,7 @@ impl OwnAIAgent {
         // Create provider-specific agent with tools and summary extractor
         let (agent, summary_extractor) = match instance.provider {
             LLMProvider::Anthropic => {
-                let client = anthropic::Client::builder()
-                    .api_key(&api_key)
-                    .build()?;
+                let client = anthropic::Client::builder().api_key(&api_key).build()?;
 
                 let tools = create_tools(&instance.id, todo_list.clone());
 
@@ -185,9 +181,7 @@ impl OwnAIAgent {
             }
 
             LLMProvider::OpenAI => {
-                let openai_client = openai::Client::builder()
-                    .api_key(&api_key)
-                    .build()?;
+                let openai_client = openai::Client::builder().api_key(&api_key).build()?;
 
                 let tools = create_tools(&instance.id, todo_list.clone());
 
@@ -572,7 +566,10 @@ Remember: You are building a long-term relationship with this user."#,
             })
             .collect();
 
-        tracing::debug!("Loaded {} messages from database for working memory", messages.len());
+        tracing::debug!(
+            "Loaded {} messages from database for working memory",
+            messages.len()
+        );
         Ok(messages)
     }
 

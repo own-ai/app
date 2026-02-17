@@ -1,4 +1,6 @@
-use crate::ai_instances::{APIKeyStorage, AIInstance, AIInstanceManager, CreateInstanceRequest, LLMProvider, ProviderInfo};
+use crate::ai_instances::{
+    AIInstance, AIInstanceManager, APIKeyStorage, CreateInstanceRequest, LLMProvider, ProviderInfo,
+};
 use std::sync::Arc;
 use tauri::State;
 use tokio::sync::Mutex;
@@ -15,7 +17,7 @@ pub fn get_providers() -> Result<Vec<ProviderInfo>, String> {
         LLMProvider::OpenAI,
         LLMProvider::Ollama,
     ];
-    
+
     let provider_infos: Vec<ProviderInfo> = providers
         .into_iter()
         .map(|p| {
@@ -24,7 +26,7 @@ pub fn get_providers() -> Result<Vec<ProviderInfo>, String> {
             } else {
                 true // Ollama doesn't need a key
             };
-            
+
             ProviderInfo {
                 id: p.to_string(),
                 name: match &p {
@@ -39,7 +41,7 @@ pub fn get_providers() -> Result<Vec<ProviderInfo>, String> {
             }
         })
         .collect();
-    
+
     Ok(provider_infos)
 }
 
@@ -47,14 +49,14 @@ pub fn get_providers() -> Result<Vec<ProviderInfo>, String> {
 #[tauri::command]
 pub fn save_api_key(provider: String, api_key: String) -> Result<(), String> {
     let provider = parse_provider(&provider)?;
-    
+
     if !provider.needs_api_key() {
         return Err(format!("Provider {} does not require an API key", provider));
     }
-    
+
     APIKeyStorage::save(&provider, &api_key)
         .map_err(|e| format!("Failed to save API key: {}", e))?;
-    
+
     tracing::info!("Saved API key for provider: {}", provider);
     Ok(())
 }
@@ -63,23 +65,21 @@ pub fn save_api_key(provider: String, api_key: String) -> Result<(), String> {
 #[tauri::command]
 pub fn has_api_key(provider: String) -> Result<bool, String> {
     let provider = parse_provider(&provider)?;
-    
+
     if !provider.needs_api_key() {
         return Ok(true); // Ollama doesn't need a key, so it's always "available"
     }
-    
-    APIKeyStorage::exists(&provider)
-        .map_err(|e| format!("Failed to check API key: {}", e))
+
+    APIKeyStorage::exists(&provider).map_err(|e| format!("Failed to check API key: {}", e))
 }
 
 /// Delete an API key for a provider
 #[tauri::command]
 pub fn delete_api_key(provider: String) -> Result<(), String> {
     let provider = parse_provider(&provider)?;
-    
-    APIKeyStorage::delete(&provider)
-        .map_err(|e| format!("Failed to delete API key: {}", e))?;
-    
+
+    APIKeyStorage::delete(&provider).map_err(|e| format!("Failed to delete API key: {}", e))?;
+
     tracing::info!("Deleted API key for provider: {}", provider);
     Ok(())
 }
@@ -117,7 +117,7 @@ pub async fn create_ai_instance(
     if provider.needs_api_key() {
         let has_key = APIKeyStorage::exists(&provider)
             .map_err(|e| format!("Failed to check API key: {}", e))?;
-        
+
         if !has_key {
             return Err(format!(
                 "API key not configured for provider: {}. Please add it in Settings.",
@@ -181,7 +181,7 @@ pub async fn delete_ai_instance(
     manager: State<'_, Arc<Mutex<AIInstanceManager>>>,
 ) -> Result<(), String> {
     let mut manager = manager.lock().await;
-    
+
     // Delete the instance
     manager
         .delete_instance(&instance_id)

@@ -1,5 +1,5 @@
-use std::collections::VecDeque;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 
 /// Message structure for working memory
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8,7 +8,7 @@ pub struct Message {
     pub role: String,
     pub content: String,
     pub timestamp: chrono::DateTime<chrono::Utc>,
-    pub importance_score: f32,  // 0.0-1.0, default 0.5
+    pub importance_score: f32, // 0.0-1.0, default 0.5
 }
 
 /// Working Memory manages a rolling window of recent messages
@@ -34,7 +34,7 @@ impl WorkingMemory {
     /// Returns messages that should be summarized if budget exceeded
     pub fn add_message(&mut self, msg: Message) -> Option<Vec<Message>> {
         let msg_tokens = Self::estimate_tokens(&msg);
-        
+
         self.messages.push_back(msg);
         self.current_tokens += msg_tokens;
 
@@ -53,7 +53,9 @@ impl WorkingMemory {
 
         for _ in 0..to_remove {
             if let Some(msg) = self.messages.pop_front() {
-                self.current_tokens = self.current_tokens.saturating_sub(Self::estimate_tokens(&msg));
+                self.current_tokens = self
+                    .current_tokens
+                    .saturating_sub(Self::estimate_tokens(&msg));
                 removed.push(msg);
             }
         }
@@ -106,11 +108,11 @@ impl WorkingMemory {
     /// Respects token budget - only loads as many messages as fit within the budget
     pub fn load_from_messages(&mut self, messages: Vec<Message>) {
         self.clear();
-        
+
         // Load messages in order, respecting token budget
         for msg in messages {
             let msg_tokens = Self::estimate_tokens(&msg);
-            
+
             // Stop loading if adding this message would exceed budget
             if self.current_tokens + msg_tokens > self.max_tokens {
                 tracing::warn!(
@@ -120,11 +122,11 @@ impl WorkingMemory {
                 );
                 break;
             }
-            
+
             self.messages.push_back(msg);
             self.current_tokens += msg_tokens;
         }
-        
+
         tracing::info!(
             "Loaded {} messages into working memory ({} tokens, {:.1}% utilization)",
             self.messages.len(),
@@ -171,9 +173,9 @@ mod tests {
     fn test_add_message() {
         let mut wm = WorkingMemory::new(1000);
         let msg = create_test_message("Hello");
-        
+
         let evicted = wm.add_message(msg);
-        
+
         assert!(evicted.is_none());
         assert_eq!(wm.message_count(), 1);
     }
@@ -181,7 +183,7 @@ mod tests {
     #[test]
     fn test_eviction() {
         let mut wm = WorkingMemory::new(100); // Very small budget
-        
+
         // Add messages until eviction occurs
         for i in 0..20 {
             let msg = create_test_message(&format!("Message {}", i));
@@ -308,10 +310,10 @@ mod tests {
     fn test_utilization() {
         let mut wm = WorkingMemory::new(1000);
         assert_eq!(wm.utilization(), 0.0);
-        
+
         let msg = create_test_message("Test message");
         wm.add_message(msg);
-        
+
         assert!(wm.utilization() > 0.0);
         assert!(wm.utilization() <= 100.0);
     }
@@ -326,11 +328,11 @@ mod tests {
     fn test_clear() {
         let mut wm = WorkingMemory::new(1000);
         wm.add_message(create_test_message("Test"));
-        
+
         assert_eq!(wm.message_count(), 1);
-        
+
         wm.clear();
-        
+
         assert_eq!(wm.message_count(), 0);
         assert_eq!(wm.current_tokens(), 0);
     }
@@ -338,15 +340,15 @@ mod tests {
     #[test]
     fn test_load_from_messages() {
         let mut wm = WorkingMemory::new(10000);
-        
+
         let messages = vec![
             create_test_message("First message"),
             create_test_message("Second message"),
             create_test_message("Third message"),
         ];
-        
+
         wm.load_from_messages(messages.clone());
-        
+
         assert_eq!(wm.message_count(), 3);
         let context = wm.get_context();
         assert_eq!(context[0].content, "First message");
@@ -357,9 +359,9 @@ mod tests {
     #[test]
     fn test_load_from_messages_empty() {
         let mut wm = WorkingMemory::new(1000);
-        
+
         wm.load_from_messages(vec![]);
-        
+
         assert_eq!(wm.message_count(), 0);
         assert_eq!(wm.current_tokens(), 0);
     }
@@ -367,7 +369,7 @@ mod tests {
     #[test]
     fn test_load_from_messages_respects_token_budget() {
         let mut wm = WorkingMemory::new(50); // Very small budget
-        
+
         // Create messages with longer content to exceed budget
         let messages = vec![
             create_test_message("This is a very long message that will definitely consume many tokens and should help us test the budget limits properly"),
@@ -376,14 +378,16 @@ mod tests {
             create_test_message("And one more message to make absolutely sure we exceed the token limit"),
             create_test_message("Final message that definitely should not fit in the budget anymore"),
         ];
-        
+
         wm.load_from_messages(messages.clone());
-        
+
         // Should have loaded some messages but not all due to budget
-        assert!(wm.message_count() < messages.len(), 
-            "Expected to load fewer than {} messages, but loaded {}", 
-            messages.len(), 
-            wm.message_count());
+        assert!(
+            wm.message_count() < messages.len(),
+            "Expected to load fewer than {} messages, but loaded {}",
+            messages.len(),
+            wm.message_count()
+        );
         assert!(wm.message_count() > 0);
         assert!(wm.current_tokens() <= wm.max_tokens());
     }
@@ -391,21 +395,21 @@ mod tests {
     #[test]
     fn test_load_from_messages_clears_existing() {
         let mut wm = WorkingMemory::new(10000);
-        
+
         // Add some messages first
         wm.add_message(create_test_message("Old message 1"));
         wm.add_message(create_test_message("Old message 2"));
         assert_eq!(wm.message_count(), 2);
-        
+
         // Load new messages - should clear old ones
         let new_messages = vec![
             create_test_message("New message 1"),
             create_test_message("New message 2"),
             create_test_message("New message 3"),
         ];
-        
+
         wm.load_from_messages(new_messages);
-        
+
         assert_eq!(wm.message_count(), 3);
         let context = wm.get_context();
         assert_eq!(context[0].content, "New message 1");

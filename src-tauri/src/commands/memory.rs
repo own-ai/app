@@ -25,11 +25,7 @@ pub async fn get_memory_stats(
     // Get working memory stats from the agent (if it exists in cache)
     let (wm_count, wm_tokens, wm_utilization) = if let Some(agent) = cache.get(&instance_id) {
         let wm = agent.context_builder().working_memory();
-        (
-            wm.message_count(),
-            wm.current_tokens(),
-            wm.utilization(),
-        )
+        (wm.message_count(), wm.current_tokens(), wm.utilization())
     } else {
         (0, 0, 0.0)
     };

@@ -20,7 +20,7 @@ pub async fn create_tables(pool: &Pool<Sqlite>) -> Result<()> {
     .execute(pool)
     .await
     .context("Failed to create messages table")?;
-    
+
     // Index for timestamp queries
     sqlx::query(
         r#"
@@ -31,7 +31,7 @@ pub async fn create_tables(pool: &Pool<Sqlite>) -> Result<()> {
     .execute(pool)
     .await
     .context("Failed to create messages timestamp index")?;
-    
+
     // User profile table
     sqlx::query(
         r#"
@@ -45,8 +45,8 @@ pub async fn create_tables(pool: &Pool<Sqlite>) -> Result<()> {
     .execute(pool)
     .await
     .context("Failed to create user_profile table")?;
-    
+
     tracing::debug!("Database tables created successfully");
-    
+
     Ok(())
 }

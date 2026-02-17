@@ -40,29 +40,25 @@ impl LongTermMemory {
     /// Initialize long-term memory with fastembed embeddings
     pub async fn new(db: Pool<Sqlite>) -> Result<Self> {
         tracing::info!("Initializing fastembed model...");
-        
+
         // Initialize fastembed
         let device = Device::Cpu;
-        let embedder = Qwen3TextEmbedding::from_hf(
-            "Qwen/Qwen3-Embedding-0.6B",
-            &device,
-            DType::F32,
-            512,
-        )
-        .map_err(|e| {
-            tracing::error!("Fastembed initialization failed with error: {:#}", e);
-            e
-        })
-        .context("Failed to initialize fastembed model")?;
-        
+        let embedder =
+            Qwen3TextEmbedding::from_hf("Qwen/Qwen3-Embedding-0.6B", &device, DType::F32, 512)
+                .map_err(|e| {
+                    tracing::error!("Fastembed initialization failed with error: {:#}", e);
+                    e
+                })
+                .context("Failed to initialize fastembed model")?;
+
         tracing::info!("Fastembed model loaded successfully");
-        
+
         // Ensure memory_entries table exists
         Self::create_table(&db).await?;
-        
+
         Ok(Self { embedder, db })
     }
-    
+
     /// Create memory_entries table with vector storage
     async fn create_table(db: &Pool<Sqlite>) -> Result<()> {
         sqlx::query(
@@ -83,23 +79,21 @@ impl LongTermMemory {
         )
         .execute(db)
         .await?;
-        
+
         // Create indices
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_entries(entry_type)",
-        )
-        .execute(db)
-        .await?;
-        
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_entries(entry_type)")
+            .execute(db)
+            .await?;
+
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_memory_importance ON memory_entries(importance DESC)",
         )
         .execute(db)
         .await?;
-        
+
         Ok(())
     }
-    
+
     /// Store a memory entry with its embedding
     pub async fn store(&mut self, entry: MemoryEntry) -> Result<()> {
         // Generate embedding
@@ -107,10 +101,10 @@ impl LongTermMemory {
             .embedder
             .embed(std::slice::from_ref(&entry.content))
             .context("Failed to generate embedding")?;
-        
+
         let embedding_vec = &embeddings[0];
         let embedding_bytes = Self::vec_to_bytes(embedding_vec);
-        
+
         // Store in database
         sqlx::query(
             r#"
@@ -132,17 +126,17 @@ impl LongTermMemory {
         .bind(serde_json::to_string(&entry.source_message_ids)?)
         .execute(&self.db)
         .await?;
-        
+
         tracing::info!(
             "Stored memory: {} (type: {:?}, importance: {})",
             entry.id,
             entry.entry_type,
             entry.importance
         );
-        
+
         Ok(())
     }
-    
+
     /// Recall memories using semantic search
     pub async fn recall(
         &mut self,
@@ -155,9 +149,9 @@ impl LongTermMemory {
             .embedder
             .embed(&[query.to_string()])
             .context("Failed to generate query embedding")?;
-        
+
         let query_vec = &query_embeddings[0];
-        
+
         // Fetch all memories above importance threshold
         let rows = sqlx::query(
             r#"
@@ -170,7 +164,7 @@ impl LongTermMemory {
         .bind(min_importance)
         .fetch_all(&self.db)
         .await?;
-        
+
         // Calculate cosine similarity and sort
         let mut scored_memories: Vec<(f32, MemoryEntry)> = rows
             .into_iter()
@@ -178,7 +172,7 @@ impl LongTermMemory {
                 let embedding_bytes: Vec<u8> = row.get("embedding");
                 let embedding = Self::bytes_to_vec(&embedding_bytes);
                 let similarity = Self::cosine_similarity(query_vec, &embedding);
-                
+
                 // Parse memory entry
                 let entry = MemoryEntry {
                     id: row.get("id"),
@@ -191,20 +185,20 @@ impl LongTermMemory {
                     tags: serde_json::from_str(row.get("tags")).ok()?,
                     source_message_ids: serde_json::from_str(row.get("source_message_ids")).ok()?,
                 };
-                
+
                 Some((similarity, entry))
             })
             .collect();
-        
+
         // Sort by similarity (descending)
         scored_memories.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        
+
         // Take top N and update access tracking
         let mut results = Vec::new();
         for (similarity, mut memory) in scored_memories.into_iter().take(limit) {
             memory.last_accessed = Utc::now();
             memory.access_count += 1;
-            
+
             // Update in database
             sqlx::query(
                 "UPDATE memory_entries SET last_accessed = ?, access_count = ? WHERE id = ?",
@@ -214,38 +208,40 @@ impl LongTermMemory {
             .bind(&memory.id)
             .execute(&self.db)
             .await?;
-            
-            tracing::debug!("Recalled memory: {} (similarity: {:.3})", memory.id, similarity);
+
+            tracing::debug!(
+                "Recalled memory: {} (similarity: {:.3})",
+                memory.id,
+                similarity
+            );
             results.push(memory);
         }
-        
+
         Ok(results)
     }
-    
+
     /// Calculate cosine similarity between two vectors
     fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         if a.len() != b.len() {
             return 0.0;
         }
-        
+
         let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
         let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
         let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-        
+
         if norm_a == 0.0 || norm_b == 0.0 {
             return 0.0;
         }
-        
+
         dot_product / (norm_a * norm_b)
     }
-    
+
     /// Convert vector to bytes for storage
     fn vec_to_bytes(vec: &[f32]) -> Vec<u8> {
-        vec.iter()
-            .flat_map(|f| f.to_le_bytes())
-            .collect()
+        vec.iter().flat_map(|f| f.to_le_bytes()).collect()
     }
-    
+
     /// Convert bytes back to vector
     fn bytes_to_vec(bytes: &[u8]) -> Vec<f32> {
         bytes

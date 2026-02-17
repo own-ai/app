@@ -227,10 +227,7 @@ impl Tool for WriteTodosTool {
             if let Some(item) = list.items.iter_mut().find(|i| i.id == update.id) {
                 item.status = update.status;
             } else {
-                return Err(PlanningError(format!(
-                    "TODO item not found: {}",
-                    update.id
-                )));
+                return Err(PlanningError(format!("TODO item not found: {}", update.id)));
             }
         }
 

@@ -44,7 +44,7 @@ pub async fn send_message(
 
     // 2. Get or create agent
     let mut cache = agent_cache.lock().await;
-    
+
     if !cache.contains_key(&request.instance_id) {
         // Initialize database for this instance
         let db = init_database(&request.instance_id)
@@ -179,7 +179,11 @@ pub async fn load_messages(
         })
         .collect();
 
-    tracing::debug!("Loaded {} messages for instance: {}", messages.len(), instance_id);
+    tracing::debug!(
+        "Loaded {} messages for instance: {}",
+        messages.len(),
+        instance_id
+    );
 
     Ok(messages)
 }
@@ -192,8 +196,8 @@ pub async fn clear_agent_cache(
 ) -> Result<(), String> {
     let mut cache = agent_cache.lock().await;
     cache.remove(&instance_id);
-    
+
     tracing::info!("Agent cache cleared for instance: {}", instance_id);
-    
+
     Ok(())
 }

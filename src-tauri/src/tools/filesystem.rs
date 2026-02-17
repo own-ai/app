@@ -18,10 +18,7 @@ fn resolve_path(root: &Path, user_path: &str) -> Result<PathBuf, String> {
         return Err("Absolute paths are not allowed".to_string());
     }
 
-    if path
-        .components()
-        .any(|c| matches!(c, Component::ParentDir))
-    {
+    if path.components().any(|c| matches!(c, Component::ParentDir)) {
         return Err("Parent directory traversal (..) is not allowed".to_string());
     }
 
@@ -414,7 +411,11 @@ impl Tool for GrepTool {
     }
 }
 
-async fn search_file(path: &Path, pattern: &str, results: &mut Vec<String>) -> Result<(), ToolError> {
+async fn search_file(
+    path: &Path,
+    pattern: &str,
+    results: &mut Vec<String>,
+) -> Result<(), ToolError> {
     if let Ok(content) = fs::read_to_string(path).await {
         for (line_num, line) in content.lines().enumerate() {
             if line.contains(pattern) {

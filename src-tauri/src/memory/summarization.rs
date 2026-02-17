@@ -52,7 +52,7 @@ impl SummarizationAgent {
     pub fn new(db: Pool<Sqlite>) -> Self {
         Self { db }
     }
-    
+
     /// Initialize summaries table
     pub async fn init_table(&self) -> Result<()> {
         sqlx::query(
@@ -74,26 +74,25 @@ impl SummarizationAgent {
         )
         .execute(&self.db)
         .await?;
-        
+
         // Add summary_id column to messages if not exists
         // Note: SQLite doesn't support ALTER TABLE ADD COLUMN IF NOT EXISTS directly
         // We'll handle this gracefully
-        let _ = sqlx::query(
-            "ALTER TABLE messages ADD COLUMN summary_id TEXT REFERENCES summaries(id)"
-        )
-        .execute(&self.db)
-        .await;
-        
+        let _ =
+            sqlx::query("ALTER TABLE messages ADD COLUMN summary_id TEXT REFERENCES summaries(id)")
+                .execute(&self.db)
+                .await;
+
         // Create indices
         sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_summaries_timestamp ON summaries(timestamp DESC)"
+            "CREATE INDEX IF NOT EXISTS idx_summaries_timestamp ON summaries(timestamp DESC)",
         )
         .execute(&self.db)
         .await?;
-        
+
         Ok(())
     }
-    
+
     /// Summarize a list of messages
     /// For now, this creates a basic summary without LLM
     /// In Phase 3, we'll integrate with rig-core for proper LLM summarization
@@ -101,11 +100,11 @@ impl SummarizationAgent {
         if messages.is_empty() {
             anyhow::bail!("Cannot summarize empty message list");
         }
-        
+
         // Create basic summary for now
         let summary_text = self.create_basic_summary(messages);
         let key_facts = self.extract_basic_facts(messages);
-        
+
         let summary = SessionSummary {
             id: uuid::Uuid::new_v4().to_string(),
             start_message_id: messages.first().unwrap().id.clone(),
@@ -117,16 +116,16 @@ impl SummarizationAgent {
             timestamp: Utc::now(),
             token_savings: self.estimate_token_savings(messages),
         };
-        
+
         tracing::info!(
             "Created summary for {} messages (saved ~{} tokens)",
             messages.len(),
             summary.token_savings
         );
-        
+
         Ok(summary)
     }
-    
+
     /// Save summary to database
     pub async fn save_summary(&self, summary: &SessionSummary) -> Result<()> {
         sqlx::query(
@@ -148,11 +147,11 @@ impl SummarizationAgent {
         .bind(summary.token_savings as i32)
         .execute(&self.db)
         .await?;
-        
+
         tracing::info!("Saved summary: {}", summary.id);
         Ok(())
     }
-    
+
     /// Link messages to their summary
     pub async fn link_messages_to_summary(
         &self,
@@ -166,16 +165,16 @@ impl SummarizationAgent {
                 .execute(&self.db)
                 .await?;
         }
-        
+
         tracing::debug!(
             "Linked {} messages to summary {}",
             message_ids.len(),
             summary_id
         );
-        
+
         Ok(())
     }
-    
+
     /// Get recent summaries
     pub async fn get_recent_summaries(&self, limit: usize) -> Result<Vec<SessionSummary>> {
         let rows = sqlx::query(
@@ -190,7 +189,7 @@ impl SummarizationAgent {
         .bind(limit as i32)
         .fetch_all(&self.db)
         .await?;
-        
+
         let summaries = rows
             .into_iter()
             .filter_map(|row| {
@@ -207,38 +206,41 @@ impl SummarizationAgent {
                 })
             })
             .collect();
-        
+
         Ok(summaries)
     }
-    
+
     /// Create a basic summary without LLM (placeholder for Phase 3)
     fn create_basic_summary(&self, messages: &[Message]) -> String {
         let user_count = messages.iter().filter(|m| m.role == "user").count();
         let agent_count = messages.iter().filter(|m| m.role == "agent").count();
-        
+
         format!(
             "Conversation with {} user messages and {} agent responses. \
              Topics discussed include various queries and responses.",
             user_count, agent_count
         )
     }
-    
+
     /// Extract basic facts (placeholder for Phase 3 LLM extraction)
     fn extract_basic_facts(&self, messages: &[Message]) -> Vec<String> {
         // For now, just return message count as a fact
-        vec![format!("Conversation contained {} messages", messages.len())]
+        vec![format!(
+            "Conversation contained {} messages",
+            messages.len()
+        )]
     }
-    
+
     /// Estimate token savings from summarization
     fn estimate_token_savings(&self, messages: &[Message]) -> usize {
         let original_tokens: usize = messages
             .iter()
             .map(|m| (m.content.len() + m.role.len()) / 4)
             .sum();
-        
+
         // Assume summary is ~10% of original size
         let summary_tokens = original_tokens / 10;
-        
+
         original_tokens.saturating_sub(summary_tokens)
     }
 

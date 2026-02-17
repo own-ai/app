@@ -16,20 +16,20 @@ use tokio::sync::Mutex;
 pub fn run() {
     // Initialize logging
     tracing_subscriber::fmt::init();
-    
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // Initialize AI Instance Manager
             let manager = ai_instances::AIInstanceManager::new()
                 .expect("Failed to initialize AI Instance Manager");
-            
+
             app.manage(Arc::new(Mutex::new(manager)));
-            
+
             // Initialize Agent Cache
             let agent_cache: commands::chat::AgentCache = Arc::new(Mutex::new(HashMap::new()));
             app.manage(agent_cache);
-            
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
