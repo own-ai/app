@@ -1,6 +1,10 @@
+import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import {
+  oneDark,
+  oneLight,
+} from "react-syntax-highlighter/dist/esm/styles/prism";
 
 interface MessageContentProps {
   content: string;
@@ -8,6 +12,22 @@ interface MessageContentProps {
 }
 
 export const MessageContent = ({ content, role }: MessageContentProps) => {
+  // Detect dark mode preference
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    if (typeof window !== "undefined") {
+      return window.matchMedia("(prefers-color-scheme: dark)").matches;
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleChange = (e: MediaQueryListEvent) => setIsDarkMode(e.matches);
+
+    mediaQuery.addEventListener("change", handleChange);
+    return () => mediaQuery.removeEventListener("change", handleChange);
+  }, []);
+
   // User and system messages are plain text
   if (role === "user" || role === "system") {
     return <div className="whitespace-pre-wrap">{content}</div>;
@@ -23,7 +43,7 @@ export const MessageContent = ({ content, role }: MessageContentProps) => {
           const match = /language-(\w+)/.exec(className || "");
           return match ? (
             <SyntaxHighlighter
-              style={oneDark}
+              style={isDarkMode ? oneDark : oneLight}
               language={match[1]}
               PreTag="div"
               className="rounded-lg my-4"

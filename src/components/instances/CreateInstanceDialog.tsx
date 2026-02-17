@@ -168,19 +168,19 @@ export const CreateInstanceDialog = ({
 
             {/* API Key Warning */}
             {needsApiKey && !hasApiKey && (
-              <div className="flex items-start gap-3 p-3 rounded-md bg-amber-50 border border-amber-200 text-amber-800">
+              <div className="flex items-start gap-3 p-3 rounded-md bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200">
                 <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
                 <div className="flex-1 text-sm">
                   <p className="font-medium">
                     {t("ai_instances.api_key_missing")}
                   </p>
-                  <p className="text-amber-700 mt-0.5">
+                  <p className="text-amber-700 dark:text-amber-300 mt-0.5">
                     {t("ai_instances.api_key_missing_hint")}
                   </p>
                   {onOpenSettings && (
                     <button
                       onClick={handleOpenSettings}
-                      className="inline-flex items-center gap-1.5 mt-2 text-amber-900 hover:underline font-medium"
+                      className="inline-flex items-center gap-1.5 mt-2 text-amber-900 dark:text-amber-100 hover:underline font-medium"
                     >
                       <Settings className="w-4 h-4" />
                       {t("ai_instances.open_settings")}
@@ -255,7 +255,9 @@ export const CreateInstanceDialog = ({
             )}
 
             {/* Error Display */}
-            {error && <p className="text-sm text-red-600">{error}</p>}
+            {error && (
+              <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+            )}
           </div>
 
           {/* Actions */}

@@ -140,7 +140,7 @@ const APIKeyRow = ({
       <div className="flex items-center justify-between mb-2">
         <span className="font-medium">{providerName}</span>
         {hasKey && !isEditing && (
-          <span className="flex items-center gap-1.5 text-sm text-green-600">
+          <span className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400">
             <Check className="w-4 h-4" />
             {t("settings.api_key_configured")}
           </span>
@@ -173,7 +173,9 @@ const APIKeyRow = ({
             </button>
           </div>
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && (
+            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+          )}
 
           <div className="flex items-center gap-2">
             <Button
@@ -200,7 +202,7 @@ const APIKeyRow = ({
               label={t("common.delete")}
               onClick={handleDelete}
               disabled={isDeleting}
-              className="text-red-600 hover:text-red-700"
+              className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
             />
           )}
         </div>

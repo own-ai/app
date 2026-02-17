@@ -52,6 +52,7 @@ export const MessageInput = ({ onSend, disabled }: MessageInputProps) => {
         className={cn(
           "flex-1 resize-none",
           "font-sans text-base",
+          "bg-surface text-foreground",
           "px-4 py-3",
           "border border-border rounded-lg",
           "focus:outline-none focus:border-border-strong",

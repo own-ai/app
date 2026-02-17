@@ -61,7 +61,7 @@
 
 /* Dark Mode Theme - automatically activated with prefers-color-scheme: dark */
 @media (prefers-color-scheme: dark) {
-  @theme {
+  :root {
     --color-background: #0a0a0a;
     --color-surface: #171717;
     --color-foreground: #fafafa;
