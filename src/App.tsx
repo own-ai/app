@@ -10,6 +10,14 @@ import { Settings } from "@/components/settings/Settings";
 import { useChatStore } from "@/stores/chatStore";
 import { useInstanceStore } from "@/stores/instanceStore";
 
+interface RawMessage {
+  id: string;
+  role: "user" | "agent" | "system";
+  content: string;
+  timestamp: string;
+  instance_id: string;
+}
+
 function App() {
   const { t } = useTranslation();
   const {
@@ -31,12 +39,38 @@ function App() {
     loadInstances();
   }, [loadInstances]);
 
+  const loadMessagesForInstance = useCallback(
+    async (instanceId: string) => {
+      setIsLoadingMessages(true);
+      try {
+        const loadedMessages = await invoke<RawMessage[]>("load_messages", {
+          instanceId,
+          limit: 1000,
+          offset: 0,
+        });
+
+        // Convert timestamps to Date objects
+        const parsedMessages = loadedMessages.map((msg) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp),
+        }));
+
+        setMessages(parsedMessages);
+      } catch (error) {
+        console.error("Failed to load messages:", error);
+      } finally {
+        setIsLoadingMessages(false);
+      }
+    },
+    [setMessages],
+  );
+
   // Load messages when active instance changes
   useEffect(() => {
     if (activeInstance) {
       loadMessagesForInstance(activeInstance.id);
     }
-  }, [activeInstance?.id]);
+  }, [activeInstance, loadMessagesForInstance]);
 
   // Show create dialog if no instances exist
   useEffect(() => {
@@ -44,29 +78,6 @@ function App() {
       setShowCreateDialog(true);
     }
   }, [instances.length, activeInstance]);
-
-  const loadMessagesForInstance = async (instanceId: string) => {
-    setIsLoadingMessages(true);
-    try {
-      const loadedMessages = await invoke<any[]>("load_messages", {
-        instanceId,
-        limit: 1000,
-        offset: 0,
-      });
-
-      // Convert timestamps to Date objects
-      const parsedMessages = loadedMessages.map((msg) => ({
-        ...msg,
-        timestamp: new Date(msg.timestamp),
-      }));
-
-      setMessages(parsedMessages);
-    } catch (error) {
-      console.error("Failed to load messages:", error);
-    } finally {
-      setIsLoadingMessages(false);
-    }
-  };
 
   const handleSend = useCallback(
     async (content: string) => {

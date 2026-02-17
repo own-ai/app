@@ -19,7 +19,7 @@ export const MessageContent = ({ content, role }: MessageContentProps) => {
       components={{
         // Code blocks
         code(props) {
-          const { node, className, children, ...rest } = props;
+          const { node: _node, className, children, ...rest } = props;
           const match = /language-(\w+)/.exec(className || "");
           return match ? (
             <SyntaxHighlighter
@@ -41,7 +41,7 @@ export const MessageContent = ({ content, role }: MessageContentProps) => {
         },
         // Links
         a(props) {
-          const { node, children, ...rest } = props;
+          const { node: _node, children, ...rest } = props;
           return (
             <a
               className="text-accent hover:text-accent-hover underline"
@@ -55,7 +55,7 @@ export const MessageContent = ({ content, role }: MessageContentProps) => {
         },
         // Paragraphs
         p(props) {
-          const { node, children, ...rest } = props;
+          const { node: _node, children, ...rest } = props;
           return (
             <p className="mb-4 last:mb-0" {...rest}>
               {children}
@@ -64,7 +64,7 @@ export const MessageContent = ({ content, role }: MessageContentProps) => {
         },
         // Headings
         h1(props) {
-          const { node, children, ...rest } = props;
+          const { node: _node, children, ...rest } = props;
           return (
             <h1 className="text-2xl font-semibold mb-4 mt-6" {...rest}>
               {children}
@@ -72,7 +72,7 @@ export const MessageContent = ({ content, role }: MessageContentProps) => {
           );
         },
         h2(props) {
-          const { node, children, ...rest } = props;
+          const { node: _node, children, ...rest } = props;
           return (
             <h2 className="text-xl font-semibold mb-3 mt-5" {...rest}>
               {children}
@@ -80,7 +80,7 @@ export const MessageContent = ({ content, role }: MessageContentProps) => {
           );
         },
         h3(props) {
-          const { node, children, ...rest } = props;
+          const { node: _node, children, ...rest } = props;
           return (
             <h3 className="text-lg font-semibold mb-2 mt-4" {...rest}>
               {children}
@@ -89,7 +89,7 @@ export const MessageContent = ({ content, role }: MessageContentProps) => {
         },
         // Lists
         ul(props) {
-          const { node, children, ...rest } = props;
+          const { node: _node, children, ...rest } = props;
           return (
             <ul className="list-disc list-inside mb-4 space-y-1" {...rest}>
               {children}
@@ -97,7 +97,7 @@ export const MessageContent = ({ content, role }: MessageContentProps) => {
           );
         },
         ol(props) {
-          const { node, children, ...rest } = props;
+          const { node: _node, children, ...rest } = props;
           return (
             <ol className="list-decimal list-inside mb-4 space-y-1" {...rest}>
               {children}
@@ -106,7 +106,7 @@ export const MessageContent = ({ content, role }: MessageContentProps) => {
         },
         // Blockquotes
         blockquote(props) {
-          const { node, children, ...rest } = props;
+          const { node: _node, children, ...rest } = props;
           return (
             <blockquote
               className="border-l-4 border-border-strong pl-4 italic my-4"

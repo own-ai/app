@@ -18,6 +18,7 @@ export const MessageList = ({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Virtualizer for performance with many messages
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => parentRef.current,
@@ -34,11 +35,12 @@ export const MessageList = ({
   }, [messages.length]);
 
   // Auto-scroll during streaming (content updates)
+  const lastMessageContent = messages[messages.length - 1]?.content;
   useEffect(() => {
     if (isStreaming && parentRef.current) {
       parentRef.current.scrollTop = parentRef.current.scrollHeight;
     }
-  }, [isStreaming, messages[messages.length - 1]?.content]);
+  }, [isStreaming, lastMessageContent]);
 
   if (messages.length === 0) {
     return (
