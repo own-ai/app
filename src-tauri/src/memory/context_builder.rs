@@ -57,11 +57,8 @@ impl ContextBuilder {
             context_parts.push("\n".to_string());
         }
         
-        // 3. Working memory (full recent conversation)
-        context_parts.push("## Recent Conversation:\n".to_string());
-        for msg in self.working_memory.get_context() {
-            context_parts.push(format!("{}: {}\n", msg.role, msg.content));
-        }
+        // Note: Working memory messages are sent separately via with_history()
+        // in agent/mod.rs - they should not be duplicated in the context string.
         
         Ok(context_parts.join(""))
     }

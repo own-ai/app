@@ -9,7 +9,7 @@ use rig::message::Message as RigMessage;
 use rig::providers::{anthropic, ollama, openai};
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
 use rig::tool::ToolDyn;
-use sqlx::{Pool, Sqlite};
+use sqlx::{Pool, Row, Sqlite};
 use std::path::PathBuf;
 
 use crate::ai_instances::{AIInstance, APIKeyStorage, LLMProvider};
@@ -120,12 +120,18 @@ impl OwnAIAgent {
         max_tokens: Option<usize>,
     ) -> Result<Self> {
         // Initialize Memory System components
-        let working_memory = WorkingMemory::new(max_tokens.unwrap_or(50_000));
+        let mut working_memory = WorkingMemory::new(max_tokens.unwrap_or(50_000));
         let long_term_memory = LongTermMemory::new(db.clone()).await?;
         let summarization_agent = SummarizationAgent::new(db.clone());
 
         // Initialize table if needed
         summarization_agent.init_table().await?;
+
+        // Load recent messages from database into working memory
+        let recent_messages = Self::load_recent_messages_from_db(&db, 100).await?;
+        if !recent_messages.is_empty() {
+            working_memory.load_from_messages(recent_messages);
+        }
 
         let context_builder = ContextBuilder::new(
             working_memory,
@@ -324,6 +330,7 @@ impl OwnAIAgent {
             role: "user".to_string(),
             content: user_message.to_string(),
             timestamp: Utc::now(),
+            importance_score: 0.5,
         };
         self.save_message_with_id(&user_msg.id, &user_msg.role, &user_msg.content)
             .await?;
@@ -386,6 +393,7 @@ impl OwnAIAgent {
             role: "agent".to_string(),
             content: response.clone(),
             timestamp: Utc::now(),
+            importance_score: 0.5,
         };
         self.save_message_with_id(&agent_msg.id, &agent_msg.role, &agent_msg.content)
             .await?;
@@ -406,6 +414,7 @@ impl OwnAIAgent {
             role: "user".to_string(),
             content: user_message.to_string(),
             timestamp: Utc::now(),
+            importance_score: 0.5,
         };
         self.save_message_with_id(&user_msg.id, &user_msg.role, &user_msg.content)
             .await?;
@@ -468,6 +477,7 @@ impl OwnAIAgent {
             role: "agent".to_string(),
             content: full_response.clone(),
             timestamp: Utc::now(),
+            importance_score: 0.5,
         };
         self.save_message_with_id(&agent_msg.id, &agent_msg.role, &agent_msg.content)
             .await?;
@@ -534,6 +544,36 @@ comes from previous conversations. Use it naturally.
 Remember: You are building a long-term relationship with this user."#,
             name = instance_name
         )
+    }
+
+    /// Helper: Load recent messages from database for working memory initialization
+    async fn load_recent_messages_from_db(db: &Pool<Sqlite>, limit: i32) -> Result<Vec<Message>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, role, content, timestamp, COALESCE(importance_score, 0.5) as importance_score
+            FROM messages
+            ORDER BY timestamp ASC
+            LIMIT ?
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(db)
+        .await
+        .context("Failed to load recent messages")?;
+
+        let messages: Vec<Message> = rows
+            .into_iter()
+            .map(|row| Message {
+                id: row.get("id"),
+                role: row.get("role"),
+                content: row.get("content"),
+                timestamp: row.get("timestamp"),
+                importance_score: row.get("importance_score"),
+            })
+            .collect();
+
+        tracing::debug!("Loaded {} messages from database for working memory", messages.len());
+        Ok(messages)
     }
 
     /// Helper: Save message to database with a specific ID.

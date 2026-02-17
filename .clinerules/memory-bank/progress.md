@@ -53,11 +53,12 @@
 ## What's Left to Build
 
 ### Phase 2 Completion - Memory System Gaps
-- [ ] Fix context duplication (working memory in context string AND chat history)
-- [ ] Working memory reload from DB on agent initialization
+- [x] Fix context duplication (working memory in context string AND chat history) - COMPLETE
+- [x] Working memory reload from DB on agent initialization - COMPLETE
+- [x] Importance scoring for messages - COMPLETE
 - [ ] Automatic fact extraction from conversations to long-term memory
 - [ ] Missing Tauri commands: search_memory, add_memory_entry, delete_memory_entry
-- [ ] Importance scoring for messages
+- [ ] LongTermMemory::delete() and search_by_type() methods
 
 ### Phase 3 - Self-Programming (Rhai Tools)
 - [ ] Rhai scripting engine activation and sandboxing
@@ -121,8 +122,6 @@
 
 ## Known Issues
 
-- Context duplication: working memory messages appear in context string AND as chat history sent to LLM
-- Working memory is empty on agent restart (messages loaded from DB to UI but not into WorkingMemory struct)
 - No automatic fact extraction pipeline from conversations to long-term memory
 - Rhai dependency exists in Cargo.toml but no Rhai code has been written
 

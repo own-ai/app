@@ -8,6 +8,7 @@ pub struct Message {
     pub role: String,
     pub content: String,
     pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub importance_score: f32,  // 0.0-1.0, default 0.5
 }
 
 /// Working Memory manages a rolling window of recent messages
@@ -101,6 +102,37 @@ impl WorkingMemory {
         self.current_tokens = 0;
     }
 
+    /// Load messages from database into working memory (e.g., on agent initialization)
+    /// Respects token budget - only loads as many messages as fit within the budget
+    pub fn load_from_messages(&mut self, messages: Vec<Message>) {
+        self.clear();
+        
+        // Load messages in order, respecting token budget
+        for msg in messages {
+            let msg_tokens = Self::estimate_tokens(&msg);
+            
+            // Stop loading if adding this message would exceed budget
+            if self.current_tokens + msg_tokens > self.max_tokens {
+                tracing::warn!(
+                    "Working memory budget reached during load. Loaded {}/{} messages",
+                    self.messages.len(),
+                    self.messages.len() + 1
+                );
+                break;
+            }
+            
+            self.messages.push_back(msg);
+            self.current_tokens += msg_tokens;
+        }
+        
+        tracing::info!(
+            "Loaded {} messages into working memory ({} tokens, {:.1}% utilization)",
+            self.messages.len(),
+            self.current_tokens,
+            self.utilization()
+        );
+    }
+
     /// Estimate tokens for a message (rough approximation: ~4 chars = 1 token)
     fn estimate_tokens(msg: &Message) -> usize {
         // Content + role + some overhead for metadata
@@ -121,6 +153,7 @@ mod tests {
             role: "user".to_string(),
             content: content.to_string(),
             timestamp: Utc::now(),
+            importance_score: 0.5,
         }
     }
 
@@ -130,6 +163,7 @@ mod tests {
             role: role.to_string(),
             content: content.to_string(),
             timestamp: Utc::now(),
+            importance_score: 0.5,
         }
     }
 
@@ -299,5 +333,81 @@ mod tests {
         
         assert_eq!(wm.message_count(), 0);
         assert_eq!(wm.current_tokens(), 0);
+    }
+
+    #[test]
+    fn test_load_from_messages() {
+        let mut wm = WorkingMemory::new(10000);
+        
+        let messages = vec![
+            create_test_message("First message"),
+            create_test_message("Second message"),
+            create_test_message("Third message"),
+        ];
+        
+        wm.load_from_messages(messages.clone());
+        
+        assert_eq!(wm.message_count(), 3);
+        let context = wm.get_context();
+        assert_eq!(context[0].content, "First message");
+        assert_eq!(context[1].content, "Second message");
+        assert_eq!(context[2].content, "Third message");
+    }
+
+    #[test]
+    fn test_load_from_messages_empty() {
+        let mut wm = WorkingMemory::new(1000);
+        
+        wm.load_from_messages(vec![]);
+        
+        assert_eq!(wm.message_count(), 0);
+        assert_eq!(wm.current_tokens(), 0);
+    }
+
+    #[test]
+    fn test_load_from_messages_respects_token_budget() {
+        let mut wm = WorkingMemory::new(50); // Very small budget
+        
+        // Create messages with longer content to exceed budget
+        let messages = vec![
+            create_test_message("This is a very long message that will definitely consume many tokens and should help us test the budget limits properly"),
+            create_test_message("Another extremely long message that will also consume a significant number of tokens to ensure we exceed the budget"),
+            create_test_message("Yet another message with substantial content to add more token usage"),
+            create_test_message("And one more message to make absolutely sure we exceed the token limit"),
+            create_test_message("Final message that definitely should not fit in the budget anymore"),
+        ];
+        
+        wm.load_from_messages(messages.clone());
+        
+        // Should have loaded some messages but not all due to budget
+        assert!(wm.message_count() < messages.len(), 
+            "Expected to load fewer than {} messages, but loaded {}", 
+            messages.len(), 
+            wm.message_count());
+        assert!(wm.message_count() > 0);
+        assert!(wm.current_tokens() <= wm.max_tokens());
+    }
+
+    #[test]
+    fn test_load_from_messages_clears_existing() {
+        let mut wm = WorkingMemory::new(10000);
+        
+        // Add some messages first
+        wm.add_message(create_test_message("Old message 1"));
+        wm.add_message(create_test_message("Old message 2"));
+        assert_eq!(wm.message_count(), 2);
+        
+        // Load new messages - should clear old ones
+        let new_messages = vec![
+            create_test_message("New message 1"),
+            create_test_message("New message 2"),
+            create_test_message("New message 3"),
+        ];
+        
+        wm.load_from_messages(new_messages);
+        
+        assert_eq!(wm.message_count(), 3);
+        let context = wm.get_context();
+        assert_eq!(context[0].content, "New message 1");
     }
 }

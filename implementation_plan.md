@@ -462,11 +462,11 @@ The logical sequence of implementation to minimize conflicts and ensure each ste
 
 ### Phase 2: Memory System Completion (5 steps)
 
-1. **Fix context duplication** - Modify `ContextBuilder::build_context()` to remove the "## Recent Conversation" section. Working memory is already sent as chat history in `agent/mod.rs` via `with_history()`. The context string should only contain long-term memories and summaries.
+1. **Fix context duplication** - ✅ COMPLETE - Modified `ContextBuilder::build_context()` to remove the "## Recent Conversation" section. Working memory is already sent as chat history in `agent/mod.rs` via `with_history()`. The context string now only contains long-term memories and summaries.
 
-2. **Add importance scoring to messages** - Add `importance_score: f32` field to `working_memory::Message`. Update `database/schema.rs` to include the column. Default to 0.5 for all messages.
+2. **Add importance scoring to messages** - ✅ COMPLETE - Added `importance_score: f32` field to `working_memory::Message`. Updated `database/schema.rs` to include the column with DEFAULT 0.5. All message creations now set importance_score to 0.5.
 
-3. **Reload working memory from DB on agent init** - Add `WorkingMemory::load_from_messages()` method. In `OwnAIAgent::new()`, after creating the agent, query the most recent N messages from the database and load them into working memory. This ensures conversation continuity across restarts.
+3. **Reload working memory from DB on agent init** - ✅ COMPLETE - Added `WorkingMemory::load_from_messages()` method with token budget respect. In `OwnAIAgent::new()`, the agent now queries the most recent 100 messages from the database and loads them into working memory. Added `load_recent_messages_from_db()` helper function. This ensures conversation continuity across restarts.
 
 4. **Implement automatic fact extraction** - Create `memory/fact_extraction.rs` with `FactExtractionAgent` that uses a rig Extractor (like the existing SummaryResponse pattern) to identify facts, preferences, and skills from each conversation turn. Call it asynchronously after each response in `chat()` and `stream_chat()`. Store results in long-term memory via `LongTermMemory::store()`.
 
