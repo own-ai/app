@@ -88,24 +88,35 @@ Once the user switches to Act Mode:
 
 After implementation, verify everything works:
 
-**Run these commands:**
+**Always run these commands if changes were made to Rust code:**
+
 ```bash
-# Check Rust compilation
+# Always check Rust compilation
 cd src-tauri
 cargo build
 
-# Run all tests
+# Always run all tests
 cargo test
 
-# Run linter
+# Always run linter
 cargo clippy
 
-# Format code
+# Always format code
 cargo fmt
-
-# Check frontend if frontend changes were made
 cd ..
+```
+
+**If you made changes to frontend code, always run:**
+
+```bash
+# Always check TypeScript compilation
 pnpm tsc --noEmit
+
+# Always run frontend linter
+pnpm lint
+
+# Always run frontend formatter
+pnpm format
 ```
 
 **Fix any errors before proceeding.** Do not update documentation if the build fails.

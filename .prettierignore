@@ -1,0 +1,10 @@
+# Ignore everything except src/
+/*
+!/src
+
+# Common ignores
+node_modules/
+dist/
+build/
+.tauri/
+target/
