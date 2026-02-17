@@ -16,7 +16,8 @@
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "format": "prettier --write src/",
-    "format:check": "prettier --check src/"
+    "format:check": "prettier --check src/",
+    "ci:local": "bash scripts/ci.sh"
   },
   "dependencies": {
     "@fontsource-variable/noto-sans": "^5.2.10",

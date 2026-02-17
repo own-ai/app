@@ -147,7 +147,12 @@ Once the build and tests succeed, update the following files:
 - Add any new known issues discovered
 - Document any evolution of project decisions
 
+#### Update memory bank
 Also update the remaining memory bank files if relevant (e.g. `systemPatterns.md` if new patterns were used).
+
+#### Update README.md and AGENTS.md
+Please check if any changes require updates to the README.md or AGENTS.md documentation.
+If so, update those files as well.
 
 **Keep updates concise** - focus on meaningful changes, not implementation details.
 
@@ -159,6 +164,7 @@ Use `attempt_completion` to summarize what was accomplished:
 - What was implemented
 - What was tested
 - What documentation was updated
+- Prepare for commit by suggesting a commit message
 - Suggested next steps
 
 **Do NOT** include the full task_progress checklist in the result - it should be in the task_progress parameter.
@@ -219,10 +225,13 @@ Use this checklist for each work session:
 - [ ] Run `cargo build` and verify success
 - [ ] Run `cargo test` and verify all tests pass
 - [ ] Run `cargo clippy` and address critical warnings
+- [ ] Run `cargo fmt` to format code
+- [ ] If frontend changes were made, run `pnpm tsc --noEmit`, `pnpm lint`, and `pnpm format`
 - [ ] Update `implementation_plan.md` with completed steps
 - [ ] Update `activeContext.md` with recent changes and next steps
 - [ ] Update `progress.md` with what works now
-- [ ] Use `attempt_completion` with summary
+- [ ] Update README.md and AGENTS.md if relevant
+- [ ] Use `attempt_completion` with summary and commit message suggestion
 
 ---
 
