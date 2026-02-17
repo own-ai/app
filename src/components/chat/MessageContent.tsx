@@ -1,18 +1,18 @@
-import ReactMarkdown from 'react-markdown';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import ReactMarkdown from "react-markdown";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 interface MessageContentProps {
   content: string;
-  role: 'user' | 'agent' | 'system';
+  role: "user" | "agent" | "system";
 }
 
 export const MessageContent = ({ content, role }: MessageContentProps) => {
   // User and system messages are plain text
-  if (role === 'user' || role === 'system') {
+  if (role === "user" || role === "system") {
     return <div className="whitespace-pre-wrap">{content}</div>;
   }
-  
+
   // Agent messages support Markdown
   return (
     <ReactMarkdown
@@ -20,7 +20,7 @@ export const MessageContent = ({ content, role }: MessageContentProps) => {
         // Code blocks
         code(props) {
           const { node, className, children, ...rest } = props;
-          const match = /language-(\w+)/.exec(className || '');
+          const match = /language-(\w+)/.exec(className || "");
           return match ? (
             <SyntaxHighlighter
               style={oneDark}
@@ -28,7 +28,7 @@ export const MessageContent = ({ content, role }: MessageContentProps) => {
               PreTag="div"
               className="rounded-lg my-4"
             >
-              {String(children).replace(/\n$/, '')}
+              {String(children).replace(/\n$/, "")}
             </SyntaxHighlighter>
           ) : (
             <code

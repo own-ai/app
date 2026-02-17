@@ -7,7 +7,7 @@
   --font-serif: "Noto Serif Variable", "Noto Serif", Georgia, serif;
   --font-sans: "Noto Sans Variable", "Noto Sans", -apple-system, sans-serif;
   --font-mono: "Noto Sans Mono", "SF Mono", Consolas, monospace;
-  
+
   /* Colors - Neutrals */
   --color-background: #fafafa;
   --color-surface: #ffffff;
@@ -16,7 +16,7 @@
   --color-muted: #737373;
   --color-border: #e5e5e5;
   --color-border-strong: #d4d4d4;
-  
+
   /* Colors - Semantic */
   --color-accent: #6b4c9a;
   --color-accent-hover: #5a3d85;
@@ -28,31 +28,31 @@
   --color-error-bg: #fee2e2;
   --color-system: #8b7355;
   --color-system-bg: #f5f5f4;
-  
+
   /* Colors - Code */
   --color-code-bg: #f5f5f5;
   --color-code-block-bg: #fafaf9;
   --color-code-border: #e7e5e4;
-  
+
   /* Spacing - Base unit (generates spacing-1, spacing-2, etc.) */
   --spacing: 0.25rem; /* 4px */
-  
+
   /* Layout */
   --content-max-width: 720px;
   --header-height: 64px;
   --input-min-height: 72px;
-  
+
   /* Breakpoints */
   --breakpoint-sm: 640px;
   --breakpoint-md: 768px;
   --breakpoint-lg: 1024px;
   --breakpoint-xl: 1280px;
-  
+
   /* Animation Timing */
-  --ease-standard: cubic-bezier(0.4, 0.0, 0.2, 1);
-  --ease-decelerate: cubic-bezier(0.0, 0.0, 0.2, 1);
-  --ease-accelerate: cubic-bezier(0.4, 0.0, 1, 1);
-  
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-decelerate: cubic-bezier(0, 0, 0.2, 1);
+  --ease-accelerate: cubic-bezier(0.4, 0, 1, 1);
+
   --duration-instant: 100ms;
   --duration-fast: 150ms;
   --duration-normal: 200ms;
@@ -68,7 +68,7 @@
     --color-user-text: #e5e5e5;
     --color-border: #262626;
     --color-border-strong: #404040;
-    
+
     --color-accent: #9b7cc4;
     --color-accent-hover: #b294d6;
     --color-success: #10b981;
@@ -79,7 +79,7 @@
     --color-error-bg: #7f1d1d;
     --color-system: #a8956b;
     --color-system-bg: #1c1917;
-    
+
     --color-code-bg: #1c1c1c;
     --color-code-block-bg: #141414;
     --color-code-border: #2d2d2d;
@@ -128,7 +128,9 @@ button {
 }
 
 /* Code and Pre elements */
-code, kbd, samp {
+code,
+kbd,
+samp {
   font-family: var(--font-mono);
   font-size: 0.9em;
 }
@@ -182,16 +184,22 @@ pre code {
 
 /* Animations */
 @keyframes pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 @keyframes pulse-scale {
-  0%, 100% { 
+  0%,
+  100% {
     opacity: 1;
     transform: scale(1);
   }
-  50% { 
+  50% {
     opacity: 0.6;
     transform: scale(1.2);
   }

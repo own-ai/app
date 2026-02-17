@@ -1,7 +1,7 @@
 // Message Types
 export interface Message {
   id: string;
-  role: 'user' | 'agent' | 'system';
+  role: "user" | "agent" | "system";
   content: string;
   timestamp: Date;
   metadata?: {
@@ -11,7 +11,7 @@ export interface Message {
 }
 
 // Provider Types
-export type ProviderType = 'anthropic' | 'openai' | 'ollama';
+export type ProviderType = "anthropic" | "openai" | "ollama";
 
 export interface ProviderInfo {
   id: ProviderType;
