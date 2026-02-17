@@ -61,7 +61,7 @@ impl WorkingMemory {
         tracing::info!(
             "Evicted {} messages from working memory (freed ~{} tokens)",
             removed.len(),
-            removed.iter().map(|m| Self::estimate_tokens(m)).sum::<usize>()
+            removed.iter().map(Self::estimate_tokens).sum::<usize>()
         );
 
         removed

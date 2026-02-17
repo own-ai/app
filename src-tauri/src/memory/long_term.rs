@@ -105,7 +105,7 @@ impl LongTermMemory {
         // Generate embedding
         let embeddings = self
             .embedder
-            .embed(&[entry.content.clone()])
+            .embed(std::slice::from_ref(&entry.content))
             .context("Failed to generate embedding")?;
         
         let embedding_vec = &embeddings[0];

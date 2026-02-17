@@ -80,7 +80,7 @@ impl Tool for LsTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let path = resolve_path(&self.root, &args.path).map_err(|e| ToolError(e))?;
+        let path = resolve_path(&self.root, &args.path).map_err(ToolError)?;
 
         if !path.exists() {
             return Err(ToolError(format!("Directory not found: {}", args.path)));
@@ -168,7 +168,7 @@ impl Tool for ReadFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let path = resolve_path(&self.root, &args.path).map_err(|e| ToolError(e))?;
+        let path = resolve_path(&self.root, &args.path).map_err(ToolError)?;
 
         let content = fs::read_to_string(&path)
             .await
@@ -239,7 +239,7 @@ impl Tool for WriteFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let path = resolve_path(&self.root, &args.path).map_err(|e| ToolError(e))?;
+        let path = resolve_path(&self.root, &args.path).map_err(ToolError)?;
 
         // Create parent directories
         if let Some(parent) = path.parent() {
@@ -314,7 +314,7 @@ impl Tool for EditFileTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let path = resolve_path(&self.root, &args.path).map_err(|e| ToolError(e))?;
+        let path = resolve_path(&self.root, &args.path).map_err(ToolError)?;
 
         let content = fs::read_to_string(&path)
             .await
@@ -395,7 +395,7 @@ impl Tool for GrepTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let path = resolve_path(&self.root, &args.path).map_err(|e| ToolError(e))?;
+        let path = resolve_path(&self.root, &args.path).map_err(ToolError)?;
         let mut results = Vec::new();
 
         if path.is_file() {
