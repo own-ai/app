@@ -252,4 +252,227 @@ impl LongTermMemory {
             })
             .collect()
     }
+
+    /// Delete a memory entry by ID
+    pub async fn delete(&self, id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM memory_entries WHERE id = ?")
+            .bind(id)
+            .execute(&self.db)
+            .await?;
+
+        tracing::info!("Deleted memory entry: {}", id);
+        Ok(())
+    }
+
+    /// Search memories by type
+    pub async fn search_by_type(
+        &self,
+        entry_type: &MemoryType,
+        limit: usize,
+    ) -> Result<Vec<MemoryEntry>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, content, entry_type, importance, created_at,
+                   last_accessed, access_count, tags, source_message_ids
+            FROM memory_entries
+            WHERE entry_type = ?
+            ORDER BY importance DESC, created_at DESC
+            LIMIT ?
+            "#,
+        )
+        .bind(serde_json::to_string(entry_type)?)
+        .bind(limit as i32)
+        .fetch_all(&self.db)
+        .await?;
+
+        let entries: Vec<MemoryEntry> = rows
+            .into_iter()
+            .filter_map(|row| {
+                Some(MemoryEntry {
+                    id: row.get("id"),
+                    content: row.get("content"),
+                    entry_type: serde_json::from_str(row.get("entry_type")).ok()?,
+                    importance: row.get("importance"),
+                    created_at: row.get("created_at"),
+                    last_accessed: row.get("last_accessed"),
+                    access_count: row.get::<i32, _>("access_count") as u32,
+                    tags: serde_json::from_str(row.get("tags")).ok()?,
+                    source_message_ids: serde_json::from_str(row.get("source_message_ids")).ok()?,
+                })
+            })
+            .collect();
+
+        tracing::debug!("Found {} memories of type {:?}", entries.len(), entry_type);
+
+        Ok(entries)
+    }
+
+    /// Count total number of memory entries
+    pub async fn count(&self) -> Result<i64> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM memory_entries")
+            .fetch_one(&self.db)
+            .await?;
+        Ok(count)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: create an in-memory SQLite database for testing
+    async fn setup_test_db() -> Pool<Sqlite> {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .expect("Failed to create in-memory database");
+
+        pool
+    }
+
+    /// Helper: create a test memory entry
+    fn create_test_entry(id: &str, content: &str, entry_type: MemoryType) -> MemoryEntry {
+        MemoryEntry {
+            id: id.to_string(),
+            content: content.to_string(),
+            entry_type,
+            importance: 0.7,
+            created_at: Utc::now(),
+            last_accessed: Utc::now(),
+            access_count: 0,
+            tags: vec![],
+            source_message_ids: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn test_delete_memory_entry() {
+        let db = setup_test_db().await;
+        let mut memory = LongTermMemory::new(db)
+            .await
+            .expect("Failed to create LongTermMemory");
+
+        // Store a memory entry
+        let entry = create_test_entry("test_id_1", "User likes pizza", MemoryType::Preference);
+        memory.store(entry).await.expect("Failed to store entry");
+
+        // Verify it exists
+        let count_before = memory.count().await.expect("Failed to count");
+        assert_eq!(count_before, 1);
+
+        // Delete it
+        memory.delete("test_id_1").await.expect("Failed to delete");
+
+        // Verify it's gone
+        let count_after = memory.count().await.expect("Failed to count");
+        assert_eq!(count_after, 0);
+    }
+
+    #[tokio::test]
+    async fn test_search_by_type() {
+        let db = setup_test_db().await;
+        let mut memory = LongTermMemory::new(db)
+            .await
+            .expect("Failed to create LongTermMemory");
+
+        // Store multiple entries of different types
+        let entries = vec![
+            create_test_entry("e1", "User knows Rust", MemoryType::Skill),
+            create_test_entry("e2", "User lives in Berlin", MemoryType::Fact),
+            create_test_entry("e3", "User prefers dark mode", MemoryType::Preference),
+            create_test_entry("e4", "User knows Python", MemoryType::Skill),
+        ];
+
+        for entry in entries {
+            memory.store(entry).await.expect("Failed to store");
+        }
+
+        // Search for skills only
+        let skills = memory
+            .search_by_type(&MemoryType::Skill, 10)
+            .await
+            .expect("Failed to search by type");
+
+        assert_eq!(skills.len(), 2);
+        assert!(skills.iter().all(|e| e.entry_type == MemoryType::Skill));
+
+        // Search for preferences
+        let prefs = memory
+            .search_by_type(&MemoryType::Preference, 10)
+            .await
+            .expect("Failed to search by type");
+
+        assert_eq!(prefs.len(), 1);
+        assert_eq!(prefs[0].content, "User prefers dark mode");
+    }
+
+    #[tokio::test]
+    async fn test_search_by_type_respects_limit() {
+        let db = setup_test_db().await;
+        let mut memory = LongTermMemory::new(db)
+            .await
+            .expect("Failed to create LongTermMemory");
+
+        // Store 5 facts
+        for i in 0..5 {
+            let entry = create_test_entry(
+                &format!("fact_{}", i),
+                &format!("Fact number {}", i),
+                MemoryType::Fact,
+            );
+            memory.store(entry).await.expect("Failed to store");
+        }
+
+        // Request only 3
+        let facts = memory
+            .search_by_type(&MemoryType::Fact, 3)
+            .await
+            .expect("Failed to search");
+
+        assert_eq!(facts.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_count() {
+        let db = setup_test_db().await;
+        let mut memory = LongTermMemory::new(db)
+            .await
+            .expect("Failed to create LongTermMemory");
+
+        // Initially empty
+        assert_eq!(memory.count().await.expect("Failed to count"), 0);
+
+        // Add entries
+        for i in 0..3 {
+            let entry = create_test_entry(
+                &format!("entry_{}", i),
+                &format!("Content {}", i),
+                MemoryType::Fact,
+            );
+            memory.store(entry).await.expect("Failed to store");
+        }
+
+        assert_eq!(memory.count().await.expect("Failed to count"), 3);
+
+        // Delete one
+        memory.delete("entry_1").await.expect("Failed to delete");
+
+        assert_eq!(memory.count().await.expect("Failed to count"), 2);
+    }
+
+    #[tokio::test]
+    async fn test_search_by_type_empty_result() {
+        let db = setup_test_db().await;
+        let memory = LongTermMemory::new(db)
+            .await
+            .expect("Failed to create LongTermMemory");
+
+        // Search when no entries exist
+        let results = memory
+            .search_by_type(&MemoryType::Context, 10)
+            .await
+            .expect("Failed to search");
+
+        assert_eq!(results.len(), 0);
+    }
 }

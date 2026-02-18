@@ -468,9 +468,9 @@ The logical sequence of implementation to minimize conflicts and ensure each ste
 
 3. **Reload working memory from DB on agent init** - ✅ COMPLETE - Added `WorkingMemory::load_from_messages()` method with token budget respect. In `OwnAIAgent::new()`, the agent now queries the most recent 100 messages from the database and loads them into working memory. Added `load_recent_messages_from_db()` helper function. This ensures conversation continuity across restarts.
 
-4. **Implement automatic fact extraction** - Create `memory/fact_extraction.rs` with `FactExtractionAgent` that uses a rig Extractor (like the existing SummaryResponse pattern) to identify facts, preferences, and skills from each conversation turn. Call it asynchronously after each response in `chat()` and `stream_chat()`. Store results in long-term memory via `LongTermMemory::store()`.
+4. **Implement automatic fact extraction** - ✅ COMPLETE - Created `memory/fact_extraction.rs` with `FactExtractionResponse` and helper functions. Added `FactExtractorProvider` enum in `agent/mod.rs`. Integrated fact extraction in both `chat()` and `stream_chat()` methods. Facts are automatically extracted and stored in long-term memory after each conversation turn.
 
-5. **Add missing memory Tauri commands** - Add `search_memory`, `add_memory_entry`, `delete_memory_entry` to `commands/memory.rs`. Register them in `lib.rs`. Add `LongTermMemory::delete()` and `LongTermMemory::search_by_type()` methods.
+5. **Add missing memory Tauri commands** - ✅ COMPLETE - Added `search_memory`, `add_memory_entry`, `delete_memory_entry` commands to `commands/memory.rs`. Registered all three in `lib.rs`. Implemented `LongTermMemory::delete()`, `LongTermMemory::search_by_type()`, and `LongTermMemory::count()` methods with full test coverage.
 
 ### Phase 3: Self-Programming with Rhai (6 steps)
 

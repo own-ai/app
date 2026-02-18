@@ -56,9 +56,9 @@
 - [x] Fix context duplication (working memory in context string AND chat history) - COMPLETE
 - [x] Working memory reload from DB on agent initialization - COMPLETE
 - [x] Importance scoring for messages - COMPLETE
-- [ ] Automatic fact extraction from conversations to long-term memory
-- [ ] Missing Tauri commands: search_memory, add_memory_entry, delete_memory_entry
-- [ ] LongTermMemory::delete() and search_by_type() methods
+- [x] Automatic fact extraction from conversations to long-term memory - COMPLETE
+- [x] Missing Tauri commands: search_memory, add_memory_entry, delete_memory_entry - COMPLETE
+- [x] LongTermMemory::delete(), search_by_type(), and count() methods - COMPLETE
 
 ### Phase 3 - Self-Programming (Rhai Tools)
 - [ ] Rhai scripting engine activation and sandboxing

@@ -51,6 +51,9 @@ pub fn run() {
             commands::chat::clear_agent_cache,
             // Memory
             commands::memory::get_memory_stats,
+            commands::memory::search_memory,
+            commands::memory::add_memory_entry,
+            commands::memory::delete_memory_entry,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

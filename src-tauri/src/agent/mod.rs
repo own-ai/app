@@ -14,8 +14,8 @@ use std::path::PathBuf;
 
 use crate::ai_instances::{AIInstance, APIKeyStorage, LLMProvider};
 use crate::memory::{
-    working_memory::Message, ContextBuilder, LongTermMemory, SessionSummary, SummarizationAgent,
-    SummaryResponse, WorkingMemory,
+    fact_extraction, working_memory::Message, ContextBuilder, FactExtractionResponse,
+    LongTermMemory, SessionSummary, SummarizationAgent, SummaryResponse, WorkingMemory,
 };
 use crate::tools::filesystem::{EditFileTool, GrepTool, LsTool, ReadFileTool, WriteFileTool};
 use crate::tools::planning::{self, SharedTodoList, WriteTodosTool};
@@ -98,10 +98,30 @@ impl SummaryExtractorProvider {
     }
 }
 
+/// Provider-specific extractor for fact extraction from conversations.
+/// Uses rig Extractors for type-safe structured output via tool-based extraction.
+enum FactExtractorProvider {
+    Anthropic(Extractor<anthropic::completion::CompletionModel, FactExtractionResponse>),
+    OpenAI(Extractor<openai::CompletionModel, FactExtractionResponse>),
+    Ollama(Extractor<ollama::CompletionModel, FactExtractionResponse>),
+}
+
+impl FactExtractorProvider {
+    /// Extract facts from a conversation turn
+    async fn extract(&self, text: &str) -> Result<FactExtractionResponse> {
+        match self {
+            Self::Anthropic(e) => Ok(e.extract(text).await?),
+            Self::OpenAI(e) => Ok(e.extract(text).await?),
+            Self::Ollama(e) => Ok(e.extract(text).await?),
+        }
+    }
+}
+
 /// OwnAI Agent with Memory, Tools, and LLM integration
 pub struct OwnAIAgent {
     agent: AgentProvider,
     summary_extractor: SummaryExtractorProvider,
+    fact_extractor: FactExtractorProvider,
     context_builder: ContextBuilder,
     db: Pool<Sqlite>,
     #[allow(dead_code)]
@@ -149,12 +169,16 @@ impl OwnAIAgent {
         };
 
         let system_prompt = Self::system_prompt(&instance.name);
-        let extractor_preamble = "Extract a structured summary from the conversation below. \
+        let summary_preamble = "Extract a structured summary from the conversation below. \
             Identify the key facts discussed, any tools that were used or mentioned, \
             and the main topics covered. Be concise but thorough.";
+        let fact_preamble = "Extract important, long-term relevant facts from this conversation turn. \
+            Focus on: user preferences, skills they mention, factual information about the user, \
+            important context for future conversations, and successful tool usage patterns. \
+            Ignore temporary context or trivial details. Each fact should be concise and self-contained.";
 
-        // Create provider-specific agent with tools and summary extractor
-        let (agent, summary_extractor) = match instance.provider {
+        // Create provider-specific agent with tools, summary extractor, and fact extractor
+        let (agent, summary_extractor, fact_extractor) = match instance.provider {
             LLMProvider::Anthropic => {
                 let client = anthropic::Client::builder().api_key(&api_key).build()?;
 
@@ -168,15 +192,22 @@ impl OwnAIAgent {
                     .tools(tools)
                     .build();
 
-                let extractor = client
+                let summary_extractor = client
                     .extractor::<SummaryResponse>(&instance.model)
-                    .preamble(extractor_preamble)
+                    .preamble(summary_preamble)
                     .max_tokens(8192)
+                    .build();
+
+                let fact_extractor = client
+                    .extractor::<FactExtractionResponse>(&instance.model)
+                    .preamble(fact_preamble)
+                    .max_tokens(4096)
                     .build();
 
                 (
                     AgentProvider::Anthropic(agent),
-                    SummaryExtractorProvider::Anthropic(extractor),
+                    SummaryExtractorProvider::Anthropic(summary_extractor),
+                    FactExtractorProvider::Anthropic(fact_extractor),
                 )
             }
 
@@ -194,15 +225,23 @@ impl OwnAIAgent {
                     .tools(tools)
                     .build();
 
-                let extractor = openai_client
+                let summary_extractor = openai_client
+                    .clone()
                     .completions_api()
                     .extractor::<SummaryResponse>(&instance.model)
-                    .preamble(extractor_preamble)
+                    .preamble(summary_preamble)
+                    .build();
+
+                let fact_extractor = openai_client
+                    .completions_api()
+                    .extractor::<FactExtractionResponse>(&instance.model)
+                    .preamble(fact_preamble)
                     .build();
 
                 (
                     AgentProvider::OpenAI(agent),
-                    SummaryExtractorProvider::OpenAI(extractor),
+                    SummaryExtractorProvider::OpenAI(summary_extractor),
+                    FactExtractorProvider::OpenAI(fact_extractor),
                 )
             }
 
@@ -219,19 +258,27 @@ impl OwnAIAgent {
                 let tools = create_tools(&instance.id, todo_list.clone());
 
                 let agent = ollama_client
+                    .clone()
                     .agent(&instance.model)
                     .preamble(&system_prompt)
                     .tools(tools)
                     .build();
 
-                let extractor = ollama_client
+                let summary_extractor = ollama_client
+                    .clone()
                     .extractor::<SummaryResponse>(&instance.model)
-                    .preamble(extractor_preamble)
+                    .preamble(summary_preamble)
+                    .build();
+
+                let fact_extractor = ollama_client
+                    .extractor::<FactExtractionResponse>(&instance.model)
+                    .preamble(fact_preamble)
                     .build();
 
                 (
                     AgentProvider::Ollama(agent),
-                    SummaryExtractorProvider::Ollama(extractor),
+                    SummaryExtractorProvider::Ollama(summary_extractor),
+                    FactExtractorProvider::Ollama(fact_extractor),
                 )
             }
         };
@@ -239,6 +286,7 @@ impl OwnAIAgent {
         Ok(OwnAIAgent {
             agent,
             summary_extractor,
+            fact_extractor,
             context_builder,
             db,
             todo_list,
@@ -389,9 +437,14 @@ impl OwnAIAgent {
             timestamp: Utc::now(),
             importance_score: 0.5,
         };
+        let agent_msg_id = agent_msg.id.clone();
         self.save_message_with_id(&agent_msg.id, &agent_msg.role, &agent_msg.content)
             .await?;
         self.add_to_working_memory(agent_msg).await;
+
+        // 8. Extract and store facts in long-term memory (non-blocking)
+        self.extract_and_store_facts(user_message, &response, &agent_msg_id)
+            .await;
 
         Ok(response)
     }
@@ -473,9 +526,14 @@ impl OwnAIAgent {
             timestamp: Utc::now(),
             importance_score: 0.5,
         };
+        let agent_msg_id = agent_msg.id.clone();
         self.save_message_with_id(&agent_msg.id, &agent_msg.role, &agent_msg.content)
             .await?;
         self.add_to_working_memory(agent_msg).await;
+
+        // 7. Extract and store facts in long-term memory (non-blocking)
+        self.extract_and_store_facts(user_message, &full_response, &agent_msg_id)
+            .await;
 
         Ok(full_response)
     }
@@ -590,5 +648,52 @@ Remember: You are building a long-term relationship with this user."#,
         .context("Failed to save message")?;
 
         Ok(())
+    }
+
+    /// Public mutable accessor for context builder (used by memory commands)
+    pub fn context_builder_mut(&mut self) -> &mut ContextBuilder {
+        &mut self.context_builder
+    }
+
+    /// Extract facts from a conversation turn and store them in long-term memory.
+    /// Called after each agent response to build up semantic knowledge over time.
+    async fn extract_and_store_facts(
+        &mut self,
+        user_message: &str,
+        agent_response: &str,
+        agent_msg_id: &str,
+    ) {
+        // Format conversation turn for extraction
+        let conversation_turn = format!("User: {}\nAgent: {}", user_message, agent_response);
+
+        // Extract facts using LLM
+        match self.fact_extractor.extract(&conversation_turn).await {
+            Ok(extraction) => {
+                if extraction.facts.is_empty() {
+                    tracing::debug!("No facts extracted from conversation turn");
+                    return;
+                }
+
+                tracing::info!(
+                    "Extracted {} facts from conversation",
+                    extraction.facts.len()
+                );
+
+                // Convert extracted facts to memory entries and store them
+                let long_term_memory = self.context_builder.long_term_memory_mut();
+
+                for fact_item in extraction.facts {
+                    let entry = fact_extraction::to_memory_entry(fact_item, agent_msg_id);
+
+                    if let Err(e) = long_term_memory.store(entry).await {
+                        tracing::warn!("Failed to store extracted fact: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                // Don't fail the chat if fact extraction fails - just log it
+                tracing::warn!("Failed to extract facts from conversation: {}", e);
+            }
+        }
     }
 }

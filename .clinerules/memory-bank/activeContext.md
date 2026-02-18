@@ -37,11 +37,17 @@ The project has **completed Phase 1 (Foundation)** and the **core of Phase 2 (Me
 
 ## Recent Changes
 
-- **Phase 2 Steps 1-3 COMPLETED**:
+- **Phase 2 COMPLETED** (Steps 1-5):
   - Fixed context duplication: removed "Recent Conversation" from context_builder.rs (messages now only sent once via with_history())
   - Added importance_score field (f32, default 0.5) to Message struct and database schema
   - Implemented working memory reload from DB on agent initialization (load_from_messages() method)
   - Agent now loads last 100 messages from DB on startup for conversation continuity
+  - **Automatic fact extraction implemented**: Created fact_extraction.rs with FactExtractionResponse and ExtractedFactItem types
+  - **FactExtractorProvider** added to agent (Anthropic/OpenAI/Ollama) using rig Extractor pattern
+  - Facts automatically extracted and stored in long-term memory after every chat turn (both chat() and stream_chat())
+  - **Three new memory Tauri commands**: search_memory, add_memory_entry, delete_memory_entry
+  - **LongTermMemory extended**: Added delete(), search_by_type(), and count() methods
+  - All new functionality has full test coverage (4 new fact_extraction tests, 3 new long_term tests)
 - Filesystem tools fully implemented with directory traversal protection and recursive grep
 - Planning tool fully implemented with TodoList, TodoItem, TodoStatus
 - Agent system prompt includes instructions for using filesystem and planning tools
@@ -50,11 +56,6 @@ The project has **completed Phase 1 (Foundation)** and the **core of Phase 2 (Me
 - Ollama provider support added alongside Anthropic and OpenAI
 
 ## Next Steps
-
-### Immediate (Phase 2 Completion - Memory Gaps)
-- Implement automatic fact extraction from conversations to long-term memory (Step 4)
-- Add missing memory Tauri commands: search_memory, add_memory_entry, delete_memory_entry (Step 5)
-- Add LongTermMemory::delete() and search_by_type() methods
 
 ### Near-term (Phase 3 - Self-Programming with Rhai)
 - Rhai sandboxed engine setup (dependency exists but no code)
