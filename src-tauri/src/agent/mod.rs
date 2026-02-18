@@ -19,6 +19,8 @@ use crate::memory::{
 };
 use crate::tools::filesystem::{EditFileTool, GrepTool, LsTool, ReadFileTool, WriteFileTool};
 use crate::tools::planning::{self, SharedTodoList, WriteTodosTool};
+use crate::tools::registry::RhaiToolRegistry;
+use crate::tools::rhai_bridge_tool::{RhaiExecuteTool, SharedRegistry};
 use crate::utils::paths;
 
 /// Macro to process streaming responses uniformly across providers.
@@ -53,7 +55,12 @@ macro_rules! process_stream {
 }
 
 /// Helper: Create the set of tools for an instance
-fn create_tools(instance_id: &str, todo_list: SharedTodoList) -> Vec<Box<dyn ToolDyn>> {
+fn create_tools(
+    instance_id: &str,
+    todo_list: SharedTodoList,
+    registry: SharedRegistry,
+    available_dynamic_tools: Vec<(String, String)>,
+) -> Vec<Box<dyn ToolDyn>> {
     let workspace =
         paths::get_instance_workspace_path(instance_id).unwrap_or_else(|_| PathBuf::from("."));
 
@@ -66,6 +73,8 @@ fn create_tools(instance_id: &str, todo_list: SharedTodoList) -> Vec<Box<dyn Too
         Box::new(GrepTool::new(workspace)),
         // Planning tool
         Box::new(WriteTodosTool::new(todo_list)),
+        // Dynamic Rhai tool executor
+        Box::new(RhaiExecuteTool::new(registry, available_dynamic_tools)),
     ];
 
     tools
@@ -126,6 +135,7 @@ pub struct OwnAIAgent {
     db: Pool<Sqlite>,
     #[allow(dead_code)]
     todo_list: SharedTodoList,
+    tool_registry: SharedRegistry,
 }
 
 /// Maximum number of multi-turn iterations for tool calling
@@ -177,12 +187,25 @@ impl OwnAIAgent {
             important context for future conversations, and successful tool usage patterns. \
             Ignore temporary context or trivial details. Each fact should be concise and self-contained.";
 
+        // Initialize Rhai Tool Registry for dynamic tools
+        let workspace =
+            paths::get_instance_workspace_path(&instance.id).unwrap_or_else(|_| PathBuf::from("."));
+        let rhai_registry = RhaiToolRegistry::new(db.clone(), workspace);
+        let available_dynamic_tools = rhai_registry.tool_summary().await.unwrap_or_default();
+        let tool_registry: SharedRegistry =
+            std::sync::Arc::new(tokio::sync::RwLock::new(rhai_registry));
+
         // Create provider-specific agent with tools, summary extractor, and fact extractor
         let (agent, summary_extractor, fact_extractor) = match instance.provider {
             LLMProvider::Anthropic => {
                 let client = anthropic::Client::builder().api_key(&api_key).build()?;
 
-                let tools = create_tools(&instance.id, todo_list.clone());
+                let tools = create_tools(
+                    &instance.id,
+                    todo_list.clone(),
+                    tool_registry.clone(),
+                    available_dynamic_tools.clone(),
+                );
 
                 let agent = client
                     .agent(&instance.model)
@@ -214,7 +237,12 @@ impl OwnAIAgent {
             LLMProvider::OpenAI => {
                 let openai_client = openai::Client::builder().api_key(&api_key).build()?;
 
-                let tools = create_tools(&instance.id, todo_list.clone());
+                let tools = create_tools(
+                    &instance.id,
+                    todo_list.clone(),
+                    tool_registry.clone(),
+                    available_dynamic_tools.clone(),
+                );
 
                 let agent = openai_client
                     .clone()
@@ -255,7 +283,12 @@ impl OwnAIAgent {
                     ollama::Client::new(Nothing)?
                 };
 
-                let tools = create_tools(&instance.id, todo_list.clone());
+                let tools = create_tools(
+                    &instance.id,
+                    todo_list.clone(),
+                    tool_registry.clone(),
+                    available_dynamic_tools.clone(),
+                );
 
                 let agent = ollama_client
                     .clone()
@@ -290,6 +323,7 @@ impl OwnAIAgent {
             context_builder,
             db,
             todo_list,
+            tool_registry,
         })
     }
 
@@ -653,6 +687,11 @@ Remember: You are building a long-term relationship with this user."#,
     /// Public mutable accessor for context builder (used by memory commands)
     pub fn context_builder_mut(&mut self) -> &mut ContextBuilder {
         &mut self.context_builder
+    }
+
+    /// Public accessor for the Rhai tool registry (used by tool commands)
+    pub fn tool_registry(&self) -> &SharedRegistry {
+        &self.tool_registry
     }
 
     /// Extract facts from a conversation turn and store them in long-term memory.

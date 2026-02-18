@@ -42,7 +42,10 @@ keyring = { version = "3.6.3", features = [
     "crypto-rust"             # Pure Rust crypto for Secret Service encryption
 ] }
 futures = "0.3.31"
-rhai = "1.24.0"
+rhai = { version = "1.24.0", features = ["sync", "serde"] }
 schemars = "1.2.1"
-reqwest = { version = "0.13.2", features = ["json"] }
+reqwest = { version = "0.13.2", features = ["blocking", "json"] }
+url = "2.5.8"
+regex = "1.12.3"
+base64 = "0.22.1"
 

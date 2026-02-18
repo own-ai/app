@@ -3,8 +3,8 @@
 ## Overall Status
 
 **Phase 1 (Foundation)**: Complete
-**Phase 2 (Memory System)**: Mostly complete (core working, some gaps remain)
-**Phase 3 (Self-Programming / Rhai)**: Not started (dependency exists, no code)
+**Phase 2 (Memory System)**: Complete
+**Phase 3 (Self-Programming / Rhai)**: Core complete (Steps 6-8, 10); remaining: Code Generation Agent (Step 9), Capability Detection (Step 11)
 **Phase 4 (Deep Agent Features)**: Filesystem Tools and Planning Tool complete; Canvas, Sub-Agents, Cron not started
 **Phase 5-7 (Polish, Testing, Release)**: Not started
 
@@ -32,12 +32,12 @@
 - [x] OwnAIAgent with rig-core 0.30 (supports Anthropic, OpenAI, Ollama)
 - [x] Streaming chat via `agent:token` events with multi-turn support
 - [x] Multi-turn tool calling (MAX_TOOL_TURNS = 50)
-- [x] SQLite database with migrations (messages, user_profile; summaries + memory_entries created dynamically)
+- [x] SQLite database with migrations (messages, user_profile, tools, tool_executions; summaries + memory_entries created dynamically)
 - [x] AI Instance Manager (create, list, update, delete instances)
 - [x] Per-instance databases at `~/.ownai/instances/{id}/ownai.db`
 - [x] API key storage via OS keychain (keyring crate)
 - [x] AgentCache for lazy agent initialization per instance
-- [x] 15 Tauri commands registered and functional
+- [x] 23 Tauri commands registered and functional
 - [x] Working Memory with VecDeque and token budget (50000 tokens default, 30% eviction)
 - [x] Summarization via LLM Extractor (rig Extractor with SummaryResponse JsonSchema struct)
 - [x] Long-term Memory with fastembed (local Qwen3-Embedding-0.6B embeddings)
@@ -49,30 +49,18 @@
 - [x] Path utilities for cross-platform file management
 - [x] Workspace directory per instance at `~/.ownai/instances/{id}/workspace/`
 - [x] Tracing/logging setup
+- [x] Sandboxed Rhai scripting engine (14 safe functions, security limits)
+- [x] Tool Registry (RhaiToolRegistry with SQLite, AST caching, execution logging, usage stats)
+- [x] RhaiExecuteTool bridge (rig Tool -> Rhai script execution)
+- [x] Dynamic tool Tauri commands (list, create, delete, execute via AgentCache)
 
 ## What's Left to Build
 
-### Phase 2 Completion - Memory System Gaps
-- [x] Fix context duplication (working memory in context string AND chat history) - COMPLETE
-- [x] Working memory reload from DB on agent initialization - COMPLETE
-- [x] Importance scoring for messages - COMPLETE
-- [x] Automatic fact extraction from conversations to long-term memory - COMPLETE
-- [x] Missing Tauri commands: search_memory, add_memory_entry, delete_memory_entry - COMPLETE
-- [x] LongTermMemory::delete(), search_by_type(), and count() methods - COMPLETE
-
-### Phase 3 - Self-Programming (Rhai Tools)
-- [ ] Rhai scripting engine activation and sandboxing
-- [ ] Safe Rust function wrappers (http_get, http_post, read_file, write_file)
-- [ ] Tool Registry with database storage (tools + tool_executions tables)
-- [ ] Dynamic tool loading and caching
-- [ ] Code Generation Agent (LLM generates Rhai scripts)
-- [ ] Capability Detection (identify when new tool is needed)
-- [ ] Tool validation and safety checks
-- [ ] Tool evolution and versioning
+### Phase 3 Remaining - Self-Programming
+- [ ] Code Generation Agent (`tools/code_generation.rs`) - LLM generates Rhai scripts
+- [ ] Capability Detection - system prompt enhancement for self-programming
 
 ### Phase 4 - Deep Agent Features
-- [x] **Planning Tool**: WriteTodosTool as rig Tool (COMPLETE)
-- [x] **Filesystem Tools**: ls, read_file, write_file, edit_file, grep (COMPLETE)
 - [ ] **Sub-Agent System**: TaskTool for delegating to specialized sub-agents
   - [ ] code-writer sub-agent
   - [ ] researcher sub-agent
@@ -122,8 +110,8 @@
 
 ## Known Issues
 
-- No automatic fact extraction pipeline from conversations to long-term memory
-- Rhai dependency exists in Cargo.toml but no Rhai code has been written
+- No known blocking issues at this time
+- send_notification is a placeholder (logs only) until Tauri notification plugin is integrated
 
 ## Evolution of Project Decisions
 
@@ -135,3 +123,5 @@
 6. **Summarization**: Uses rig Extractor with JsonSchema struct (SummaryResponse) instead of raw LLM prompting
 7. **Tool Registration**: Uses create_tools() helper + `.tools()` builder method instead of individual `.tool()` calls
 8. **Provider Support**: Added Ollama alongside Anthropic and OpenAI from early on
+9. **Rhai Safe Functions**: Expanded from 6 to 14 functions after reviewing use cases (added regex, base64, url_encode, datetime, notification, flexible http_request with headers)
+10. **Per-Instance Tool Registry**: Tool commands access registry through AgentCache (not global Tauri state) for proper isolation

@@ -2,7 +2,7 @@
 
 ## Current Work Focus
 
-The project has **completed Phase 1 (Foundation)** and the **core of Phase 2 (Memory System)**. All basic infrastructure is functional including chat, streaming, multi-instance management, and the memory hierarchy. The **Filesystem Tools and Planning Tool are fully implemented**. The focus is now on completing remaining memory gaps and moving into Phase 3 (Self-Programming) and Phase 4 (Deep Agent Features including Canvas).
+The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**, and the **core of Phase 3 (Self-Programming)**. Steps 6-8 and 10 of Phase 3 are complete: the sandboxed Rhai scripting engine, Tool Registry with DB storage, RhaiExecuteTool bridge, and full agent integration with Tauri commands. The remaining Phase 3 work is Step 9 (Code Generation Agent) and Step 11 (Capability Detection). After that, Phase 4 (Deep Agent Features including Canvas) is next.
 
 ## What Has Been Built
 
@@ -22,7 +22,7 @@ The project has **completed Phase 1 (Foundation)** and the **core of Phase 2 (Me
 - OwnAIAgent with rig-core 0.30 integration (Anthropic, OpenAI, Ollama providers)
 - Multi-turn tool calling support (up to 50 turns)
 - Streaming chat via Tauri events (`agent:token`) with multi-turn stream processing
-- SQLite database with schema (messages, user_profile; summaries and memory_entries created dynamically)
+- SQLite database with schema (messages, user_profile, tools, tool_executions; summaries and memory_entries created dynamically)
 - AI Instance Manager with per-instance databases at `~/.ownai/instances/{id}/`
 - API key storage via OS keychain (keyring crate)
 - Working Memory (VecDeque with configurable token budget, default 50000 tokens, 30% eviction)
@@ -31,39 +31,33 @@ The project has **completed Phase 1 (Foundation)** and the **core of Phase 2 (Me
 - Context Builder (assembles context from working memory + summaries + long-term memory)
 - **Filesystem Tools**: ls, read_file, write_file, edit_file, grep - with security (path traversal prevention), tests, and registered with agent
 - **Planning Tool**: write_todos with SharedTodoList, status tracking, markdown output, tests, and registered with agent
-- 15 registered Tauri commands (instances CRUD, providers, API keys, chat, memory stats)
+- **Rhai Scripting Engine**: Sandboxed engine with 14 safe functions (HTTP, filesystem, JSON, regex, base64, URL encoding, datetime, notifications)
+- **Tool Registry**: RhaiToolRegistry with SQLite storage, AST caching, execution logging, usage stats tracking
+- **RhaiExecuteTool**: rig Tool bridge that lets the LLM invoke dynamic Rhai tools by name
+- **Tool Commands**: 4 Tauri commands for dynamic tool management (list, create, delete, execute) via AgentCache
+- 23 registered Tauri commands (instances CRUD, providers, API keys, chat, memory stats, memory CRUD, dynamic tools)
 - AgentCache for multi-instance agent management
 - Workspace directory per instance at `~/.ownai/instances/{id}/workspace/`
 
 ## Recent Changes
 
-- **Phase 2 COMPLETED** (Steps 1-5):
-  - Fixed context duplication: removed "Recent Conversation" from context_builder.rs (messages now only sent once via with_history())
-  - Added importance_score field (f32, default 0.5) to Message struct and database schema
-  - Implemented working memory reload from DB on agent initialization (load_from_messages() method)
-  - Agent now loads last 100 messages from DB on startup for conversation continuity
-  - **Automatic fact extraction implemented**: Created fact_extraction.rs with FactExtractionResponse and ExtractedFactItem types
-  - **FactExtractorProvider** added to agent (Anthropic/OpenAI/Ollama) using rig Extractor pattern
-  - Facts automatically extracted and stored in long-term memory after every chat turn (both chat() and stream_chat())
-  - **Three new memory Tauri commands**: search_memory, add_memory_entry, delete_memory_entry
-  - **LongTermMemory extended**: Added delete(), search_by_type(), and count() methods
-  - All new functionality has full test coverage (4 new fact_extraction tests, 3 new long_term tests)
-- Filesystem tools fully implemented with directory traversal protection and recursive grep
-- Planning tool fully implemented with TodoList, TodoItem, TodoStatus
-- Agent system prompt includes instructions for using filesystem and planning tools
-- Multi-turn tool calling enabled (MAX_TOOL_TURNS = 50)
-- Summarization uses rig Extractor for structured LLM output (SummaryResponse)
-- Ollama provider support added alongside Anthropic and OpenAI
+- **Phase 3 Steps 6-8 + 10 COMPLETED**:
+  - Created `tools/rhai_engine.rs` with sandboxed Rhai engine (14 safe functions, security limits)
+  - Created `tools/registry.rs` with RhaiToolRegistry (register, execute, list, delete, cache, stats)
+  - Created `tools/rhai_bridge_tool.rs` with RhaiExecuteTool implementing rig::tool::Tool
+  - Added `tools` and `tool_executions` tables to database schema
+  - Integrated RhaiExecuteTool into agent's `create_tools()` with SharedRegistry
+  - Added `tool_registry: SharedRegistry` field to OwnAIAgent struct
+  - Created `commands/tools.rs` with 4 Tauri commands accessing registry per-instance via AgentCache
+  - Registered all commands in `lib.rs` (now 23 total)
+  - Added `regex` and `base64` crate dependencies, `blocking` feature for reqwest
+  - All 77 tests pass, cargo clippy clean, cargo fmt applied
 
 ## Next Steps
 
-### Near-term (Phase 3 - Self-Programming with Rhai)
-- Rhai sandboxed engine setup (dependency exists but no code)
-- Safe Rust function wrappers (http_get, http_post, etc.)
-- Tool Registry with DB storage (tools + tool_executions tables)
-- Dynamic tool loading and caching
-- Code Generation Agent (LLM generates Rhai scripts)
-- Capability Detection (identify when new tool is needed)
+### Near-term (Phase 3 remaining)
+- Step 9: Code Generation Agent (`tools/code_generation.rs`) - LLM generates Rhai scripts
+- Step 11: Capability Detection - system prompt enhancement for self-programming
 
 ### Medium-term (Phase 4 - Deep Agent Features)
 - Canvas System (iframe-based HTML app rendering) - HIGH PRIORITY for use cases
@@ -87,6 +81,9 @@ The project has **completed Phase 1 (Foundation)** and the **core of Phase 2 (Me
 - **Database**: One SQLite file per AI instance for complete isolation
 - **Summarization**: Uses rig Extractor (not raw prompting) for structured JSON output
 - **Tool Registration**: Tools are created in `create_tools()` helper and passed to agent builder via `.tools()`
+- **Dynamic Tools**: SharedRegistry = `Arc<RwLock<RhaiToolRegistry>>` per agent instance for concurrent access
+- **Rhai Safety**: HTTPS-only HTTP, workspace-scoped filesystem, max operations limit, path traversal prevention
+- **Per-Instance Registry**: Tool commands access registry through AgentCache (not global Tauri state)
 
 ## Important Patterns and Preferences
 
@@ -97,3 +94,4 @@ The project has **completed Phase 1 (Foundation)** and the **core of Phase 2 (Me
 - All data local, privacy by default
 - CSS variables for theming, Tailwind for utility classes
 - Agent uses `process_stream!` macro for uniform streaming across providers
+- Rhai scripts receive parameters via `params_json` scope variable (parsed with `json_parse()`)

@@ -54,6 +54,11 @@ pub fn run() {
             commands::memory::search_memory,
             commands::memory::add_memory_entry,
             commands::memory::delete_memory_entry,
+            // Dynamic Tools (Rhai)
+            commands::tools::list_dynamic_tools,
+            commands::tools::create_dynamic_tool,
+            commands::tools::delete_dynamic_tool,
+            commands::tools::execute_dynamic_tool,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
