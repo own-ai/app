@@ -15,8 +15,8 @@ ownAI is a Tauri 2.0 desktop application with a React frontend and a Rust backen
 │       │Tauri invoke│            │        │
 ├───────┴────────────┴────────────┴────────┤
 │              Tauri Commands               │
-│  (15 commands: chat, instances, memory,   │
-│   providers, api keys)                    │
+│  (24 commands: chat, instances, memory,   │
+│   providers, api keys, dynamic tools)     │
 ├──────────────────────────────────────────┤
 │            Rust Backend                   │
 │  ┌──────────┐ ┌────────┐ ┌───────────┐  │
@@ -101,11 +101,16 @@ Two stores:
 ```
 OwnAIAgent
 ├── model (rig-core Agent - Anthropic, OpenAI, or Ollama)
-├── tools (Filesystem: ls, read_file, write_file, edit_file, grep; Planning: write_todos)
+├── tools (10 total):
+│   ├── Filesystem: ls, read_file, write_file, edit_file, grep
+│   ├── Planning: write_todos
+│   ├── Dynamic: execute_dynamic_tool (Rhai bridge)
+│   └── Self-Programming: create_tool, read_tool, update_tool
 ├── working_memory (VecDeque<Message>)
 ├── summarization (SummarizationAgent)
 ├── long_term_memory (LongTermMemory with fastembed)
 ├── context_builder (ContextBuilder)
+├── tool_registry (SharedRegistry = Arc<RwLock<RhaiToolRegistry>>)
 └── db (SqlitePool)
 ```
 
@@ -121,12 +126,13 @@ OwnAIAgent
 - Avoids re-creating agents on every request
 
 #### Command Pattern (Tauri)
-- 15 registered commands grouped by domain:
-  - **Instances**: create, list, update, delete, get_active, set_active
-  - **Chat**: send_message, load_messages
-  - **Providers**: get_available_providers, get_available_models
-  - **API Keys**: save_api_key, get_api_key, delete_api_key
-  - **Memory**: get_memory_stats
+- 24 registered commands grouped by domain:
+  - **Instances**: create, list, delete, set_active, get_active
+  - **Providers**: get_providers
+  - **API Keys**: save_api_key, has_api_key, delete_api_key
+  - **Chat**: send_message, stream_message, load_messages, clear_agent_cache
+  - **Memory**: get_memory_stats, search_memory, add_memory_entry, delete_memory_entry
+  - **Dynamic Tools**: list_dynamic_tools, create_dynamic_tool, update_dynamic_tool, delete_dynamic_tool, execute_dynamic_tool
 - All commands are async, return `Result<T, String>`
 - State accessed via `tauri::State<Arc<Mutex<T>>>`
 
@@ -206,20 +212,48 @@ CREATE TABLE user_profile (
     value TEXT NOT NULL,
     updated_at DATETIME NOT NULL
 );
+
+CREATE TABLE tools (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL,
+    version TEXT NOT NULL DEFAULT '1.0.0',
+    script_content TEXT NOT NULL,
+    parameters TEXT NOT NULL DEFAULT '[]',  -- JSON array of ParameterDef
+    status TEXT NOT NULL DEFAULT 'active',  -- 'active' | 'deprecated' | 'testing'
+    created_at DATETIME NOT NULL,
+    last_used DATETIME,
+    usage_count INTEGER NOT NULL DEFAULT 0,
+    success_count INTEGER NOT NULL DEFAULT 0,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    parent_tool_id TEXT
+);
+
+CREATE TABLE tool_executions (
+    id TEXT PRIMARY KEY,
+    tool_id TEXT NOT NULL,
+    timestamp DATETIME NOT NULL,
+    success INTEGER NOT NULL,
+    execution_time_ms INTEGER NOT NULL,
+    error_message TEXT,
+    input_params TEXT,
+    output TEXT,
+    FOREIGN KEY (tool_id) REFERENCES tools(id)
+);
 ```
+
+## Implemented: Self-Programming Level 1 (Rhai Tools)
+
+The agent can create, read, update, and execute dynamic Rhai tools:
+- **Sandboxed Rhai Engine**: 14 safe functions (HTTP, filesystem, JSON, regex, base64, URL encoding, datetime, notifications), security limits (max operations, max string size)
+- **Tool Registry**: SQLite-backed with AST caching, execution logging, usage statistics, version management
+- **RhaiExecuteTool**: rig Tool bridge that lets the agent invoke dynamic tools by name
+- **Self-Programming Tools**: CreateToolTool, ReadToolTool, UpdateToolTool - agent writes Rhai code and iterates
+- **Comprehensive System Prompt**: Includes self-programming instructions, Rhai language reference, and tool iteration workflow
 
 ## Planned Architecture (Not Yet Implemented)
 
-### Two-Level Self-Programming
-
-#### Level 1: Tools (Rhai Scripts)
-- Sandboxed Rhai scripting engine
-- LLM generates Rhai scripts for new capabilities
-- Tool Registry in database with versioning
-- Dynamic loading and execution
-- Security: max operations, max string size, safe function wrappers
-
-#### Level 2: Programs (Canvas/HTML Apps)
+### Self-Programming Level 2: Programs (Canvas/HTML Apps)
 - LLM generates HTML/CSS/JS single-page apps
 - Rendered in sandboxed iframe ("Canvas")
 - Bridge API via postMessage for backend communication
@@ -229,8 +263,6 @@ CREATE TABLE user_profile (
 ### Deep Agent System (Remaining)
 - **Sub-Agents**: Specialized agents (code-writer, researcher, memory-manager)
 - **Scheduled Tasks**: tokio-cron-scheduler for recurring actions
-
-> **Already Implemented**: Planning Tool (write_todos with SharedTodoList) and Filesystem Tools (ls, read_file, write_file, edit_file, grep) are fully implemented and registered with the agent via `create_tools()`.
 
 ### Bridge API (for Canvas Programs)
 ```typescript

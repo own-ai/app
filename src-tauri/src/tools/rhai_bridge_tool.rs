@@ -171,7 +171,7 @@ mod tests {
         Arc::new(RwLock::new(registry))
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_execute_dynamic_tool() {
         let registry = test_registry().await;
         let tool = RhaiExecuteTool::new(registry, vec![("test_add".into(), "Adds 1 + 1".into())]);

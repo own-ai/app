@@ -4,8 +4,8 @@
 
 **Phase 1 (Foundation)**: Complete
 **Phase 2 (Memory System)**: Complete
-**Phase 3 (Self-Programming / Rhai)**: Core complete (Steps 6-8, 10); remaining: Code Generation Agent (Step 9), Capability Detection (Step 11)
-**Phase 4 (Deep Agent Features)**: Filesystem Tools and Planning Tool complete; Canvas, Sub-Agents, Cron not started
+**Phase 3 (Self-Programming / Rhai)**: Complete
+**Phase 4 (Deep Agent Features)**: Not started (next: Step 12 Canvas System - Backend)
 **Phase 5-7 (Polish, Testing, Release)**: Not started
 
 ## What Works
@@ -37,7 +37,7 @@
 - [x] Per-instance databases at `~/.ownai/instances/{id}/ownai.db`
 - [x] API key storage via OS keychain (keyring crate)
 - [x] AgentCache for lazy agent initialization per instance
-- [x] 23 Tauri commands registered and functional
+- [x] 24 Tauri commands registered and functional
 - [x] Working Memory with VecDeque and token budget (50000 tokens default, 30% eviction)
 - [x] Summarization via LLM Extractor (rig Extractor with SummaryResponse JsonSchema struct)
 - [x] Long-term Memory with fastembed (local Qwen3-Embedding-0.6B embeddings)
@@ -52,26 +52,26 @@
 - [x] Sandboxed Rhai scripting engine (14 safe functions, security limits)
 - [x] Tool Registry (RhaiToolRegistry with SQLite, AST caching, execution logging, usage stats)
 - [x] RhaiExecuteTool bridge (rig Tool -> Rhai script execution)
-- [x] Dynamic tool Tauri commands (list, create, delete, execute via AgentCache)
+- [x] Dynamic tool Tauri commands (list, create, update, delete, execute via AgentCache)
+- [x] Self-programming tools (CreateToolTool, ReadToolTool, UpdateToolTool)
+- [x] Comprehensive system prompt with self-programming instructions and Rhai reference
 
 ## What's Left to Build
 
-### Phase 3 Remaining - Self-Programming
-- [ ] Code Generation Agent (`tools/code_generation.rs`) - LLM generates Rhai scripts
-- [ ] Capability Detection - system prompt enhancement for self-programming
-
 ### Phase 4 - Deep Agent Features
-- [ ] **Sub-Agent System**: TaskTool for delegating to specialized sub-agents
-  - [ ] code-writer sub-agent
-  - [ ] researcher sub-agent
-  - [ ] memory-manager sub-agent
 - [ ] **Canvas System**: iframe-based HTML app rendering
+  - [ ] Canvas backend (program CRUD, file storage, DB tables)
+  - [ ] Custom Protocol (Tauri protocol for serving HTML)
   - [ ] Canvas component in frontend
   - [ ] Split-view layout (Chat + Canvas)
   - [ ] Program storage at `~/.ownai/instances/{id}/programs/`
   - [ ] Program iteration via chat
 - [ ] **Bridge API**: postMessage communication between Canvas apps and backend
   - [ ] chat(), storeData(), loadData(), notify(), readFile(), writeFile()
+- [ ] **Sub-Agent System**: TaskTool for delegating to specialized sub-agents
+  - [ ] code-writer sub-agent
+  - [ ] researcher sub-agent
+  - [ ] memory-manager sub-agent
 - [ ] **Scheduled Tasks**: Cron-like system
   - [ ] tokio-cron-scheduler integration
   - [ ] Task creation/management via chat
@@ -125,3 +125,4 @@
 8. **Provider Support**: Added Ollama alongside Anthropic and OpenAI from early on
 9. **Rhai Safe Functions**: Expanded from 6 to 14 functions after reviewing use cases (added regex, base64, url_encode, datetime, notification, flexible http_request with headers)
 10. **Per-Instance Tool Registry**: Tool commands access registry through AgentCache (not global Tauri state) for proper isolation
+11. **Self-Programming Architecture**: Agent writes Rhai code directly and uses create_tool/read_tool/update_tool instead of a separate CodeGenerationAgent with internal LLM calls

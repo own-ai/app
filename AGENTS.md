@@ -58,8 +58,8 @@ pnpm tauri dev
 ### Database Setup
 
 The application automatically initializes the SQLite database on first run at:
-- macOS/Linux: `~/.ownai/ownai.db`
-- Windows: `%APPDATA%/ownai/ownai.db`
+- macOS/Linux: `~/.ownai/instances/{id}/ownai.db`
+- Windows: `%APPDATA%/ownai/instances/{id}/ownai.db`
 
 Database migrations are managed through sqlx. To create a new migration:
 
@@ -160,7 +160,8 @@ app/
 │   │   ├── commands/             # Tauri commands (Frontend API)
 │   │   │   ├── chat.rs           # Chat message commands
 │   │   │   ├── instances.rs      # Instance management commands
-│   │   │   └── memory.rs         # Memory system commands
+│   │   │   ├── memory.rs         # Memory system commands
+│   │   │   └── tools.rs          # Dynamic tool management commands
 │   │   ├── database/             # Database layer
 │   │   │   ├── schema.rs         # Table definitions, migrations
 │   │   │   └── mod.rs            # Connection management
@@ -168,7 +169,16 @@ app/
 │   │   │   ├── working_memory.rs # Recent messages (rolling window)
 │   │   │   ├── summarization.rs  # Conversation summarization
 │   │   │   ├── long_term.rs      # Vector store, semantic search
+│   │   │   ├── fact_extraction.rs # Automatic fact extraction from conversations
 │   │   │   ├── context_builder.rs # Assembles context for LLM
+│   │   │   └── mod.rs
+│   │   ├── tools/                # Tool system
+│   │   │   ├── filesystem.rs     # ls, read, write, edit, grep tools
+│   │   │   ├── planning.rs       # TODO list management tool
+│   │   │   ├── registry.rs       # RhaiToolRegistry (SQLite, AST caching)
+│   │   │   ├── rhai_engine.rs    # Sandboxed Rhai engine (14 safe functions)
+│   │   │   ├── rhai_bridge_tool.rs # RhaiExecuteTool (rig Tool bridge)
+│   │   │   ├── code_generation.rs # CreateTool, ReadTool, UpdateTool
 │   │   │   └── mod.rs
 │   │   ├── utils/                # Utility functions
 │   │   │   └── paths.rs          # Cross-platform path handling
@@ -289,6 +299,36 @@ CREATE TABLE user_profile (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
     updated_at DATETIME NOT NULL
+);
+
+-- Dynamic Rhai tools (self-programming)
+CREATE TABLE tools (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL,
+    version TEXT NOT NULL DEFAULT '1.0.0',
+    script_content TEXT NOT NULL,
+    parameters TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at DATETIME NOT NULL,
+    last_used DATETIME,
+    usage_count INTEGER NOT NULL DEFAULT 0,
+    success_count INTEGER NOT NULL DEFAULT 0,
+    failure_count INTEGER NOT NULL DEFAULT 0,
+    parent_tool_id TEXT
+);
+
+-- Tool execution log
+CREATE TABLE tool_executions (
+    id TEXT PRIMARY KEY,
+    tool_id TEXT NOT NULL,
+    timestamp DATETIME NOT NULL,
+    success INTEGER NOT NULL,
+    execution_time_ms INTEGER NOT NULL,
+    error_message TEXT,
+    input_params TEXT,
+    output TEXT,
+    FOREIGN KEY (tool_id) REFERENCES tools(id)
 );
 ```
 
@@ -505,7 +545,7 @@ Always use multiples of 4px. Use Tailwind spacing scale:
 <div className="py-6 px-8" />  // 24px, 32px
 
 // Bad - arbitrary values
-<div className="py-[23px]" />
+<div className="py-5.75" />
 ```
 
 #### No Emojis
@@ -746,7 +786,7 @@ Never commit API keys to the repository. Store them securely:
 
 ### Tool Execution Sandbox
 
-When self-programming is implemented, generated tools will run in a Rhai sandbox with:
+Generated tools run in a Rhai sandbox with:
 - No direct filesystem access (only through safe Rust functions)
 - Max operations limit (prevents infinite loops)
 - Max memory limits

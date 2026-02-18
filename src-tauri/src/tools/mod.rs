@@ -1,3 +1,4 @@
+pub mod code_generation;
 pub mod filesystem;
 pub mod planning;
 pub mod registry;

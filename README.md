@@ -132,10 +132,10 @@ ownAI follows a minimalist, typography-driven design philosophy. Key principles:
 
 - [x] Hierarchical memory system with automatic summarization
 - [x] Multi-provider LLM integration (Anthropic, OpenAI, Ollama)
-- [ ] Self-programming: Rhai-based backend tools
+- [x] Self-programming: Rhai-based backend tools (sandboxed engine, tool registry, create/read/update/execute)
+- [x] Filesystem tools and planning (ls, read, write, edit, grep, TODO lists)
 - [ ] Canvas system: LLM-generated interactive HTML programs
-- [ ] Deep agent features: planning, sub-agents, filesystem tools
-- [ ] Scheduled tasks (cron-like recurring agent actions)
+- [ ] Sub-agent system and scheduled tasks
 - [ ] Tool and program marketplace (community sharing)
 - [ ] Mobile applications (iOS/Android via Tauri Mobile)
 - [ ] Voice interface and multimodal support

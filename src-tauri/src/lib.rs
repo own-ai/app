@@ -57,6 +57,7 @@ pub fn run() {
             // Dynamic Tools (Rhai)
             commands::tools::list_dynamic_tools,
             commands::tools::create_dynamic_tool,
+            commands::tools::update_dynamic_tool,
             commands::tools::delete_dynamic_tool,
             commands::tools::execute_dynamic_tool,
         ])

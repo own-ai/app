@@ -132,6 +132,50 @@ pub async fn delete_dynamic_tool(
     Ok(())
 }
 
+/// Update an existing dynamic tool's script and optionally its description.
+#[tauri::command]
+pub async fn update_dynamic_tool(
+    instance_id: String,
+    name: String,
+    script_content: String,
+    description: Option<String>,
+    parameters: Option<Vec<ParameterDef>>,
+    agent_cache: State<'_, AgentCache>,
+) -> Result<ToolInfo, String> {
+    let cache = agent_cache.lock().await;
+
+    let agent = cache
+        .get(&instance_id)
+        .ok_or_else(|| "Agent not in cache - please send a message first".to_string())?;
+
+    let mut registry = agent.tool_registry().write().await;
+    let tool = registry
+        .update_tool(&name, &script_content, description.as_deref(), parameters)
+        .await
+        .map_err(|e| format!("Failed to update tool: {}", e))?;
+
+    tracing::info!(
+        "Updated dynamic tool '{}' to version {} for instance {}",
+        name,
+        tool.version,
+        instance_id
+    );
+
+    Ok(ToolInfo {
+        id: tool.id,
+        name: tool.name,
+        description: tool.description,
+        version: tool.version,
+        status: tool.status.to_string(),
+        usage_count: tool.usage_count,
+        success_count: tool.success_count,
+        failure_count: tool.failure_count,
+        parameters: tool.parameters,
+        created_at: tool.created_at.to_rfc3339(),
+        last_used: tool.last_used.map(|d| d.to_rfc3339()),
+    })
+}
+
 /// Execute a dynamic tool with the given parameters.
 #[tauri::command]
 pub async fn execute_dynamic_tool(

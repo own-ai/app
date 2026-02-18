@@ -20,7 +20,7 @@
 - **Embeddings**: fastembed 5.8 (local, Qwen3-Embedding-0.6B model)
 - **Tensor Ops**: candle-core 0.9
 - **ONNX Runtime**: ort 2.0-rc
-- **Scripting**: Rhai 1.24 (for self-programming, not yet active)
+- **Scripting**: Rhai 1.24
 - **API Key Storage**: keyring 3.6 (OS keychain)
 - **HTTP Client**: reqwest 0.13
 - **JSON Schema**: schemars 1.2
@@ -94,7 +94,7 @@ RUN_ALL_TESTS=1 ./scripts/ci.sh
 ### Database
 - Auto-initialized on first run at `~/.ownai/instances/{id}/ownai.db`
 - Migrations embedded in code via `schema.rs` (run_migrations function)
-- Schema includes: messages, summaries, memory_entries, user_profile
+- Schema includes: messages, summaries, memory_entries, user_profile, tools, tool_executions
 
 ## Technical Constraints
 
@@ -146,10 +146,10 @@ app/
 │   ├── src/
 │   │   ├── agent/                # OwnAIAgent (rig-core integration)
 │   │   ├── ai_instances/         # Manager, models, keychain
-│   │   ├── commands/             # Tauri commands (chat, instances, memory)
+│   │   ├── commands/             # Tauri commands (chat, instances, memory, tools)
 │   │   ├── database/             # SQLite schema and migrations
 │   │   ├── memory/               # Working memory, summarization, long-term, context builder
-│   │   ├── tools/                # Filesystem, planning (stubs)
+│   │   ├── tools/                # Filesystem, planning, registry, rhai_engine, rhai_bridge, code_generation
 │   │   ├── utils/                # Path helpers
 │   │   ├── lib.rs                # App setup, command registration
 │   │   └── main.rs               # Entry point

@@ -88,6 +88,24 @@ pub struct ToolExecutionRecord {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Increment a semver-like version string (e.g. "1.0.0" -> "1.1.0").
+/// Increments the minor version. Falls back to appending ".1" on parse failure.
+fn increment_version(version: &str) -> String {
+    let parts: Vec<&str> = version.split('.').collect();
+    if parts.len() == 3 {
+        let major = parts[0];
+        let minor: u32 = parts[1].parse().unwrap_or(0);
+        let _patch = parts[2];
+        format!("{}.{}.0", major, minor + 1)
+    } else {
+        format!("{}.1", version)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -201,10 +219,13 @@ impl RhaiToolRegistry {
         let params_str = serde_json::to_string(&params)?;
         scope.push("params_json", params_str);
 
-        // Execute the script
-        let result = self
-            .engine
-            .eval_ast_with_scope::<rhai::Dynamic>(&mut scope, &ast);
+        // Execute the script inside block_in_place so that synchronous
+        // blocking operations (e.g. reqwest::blocking in Rhai HTTP helpers)
+        // do not panic when they create/drop their own tokio runtime.
+        let result = tokio::task::block_in_place(|| {
+            self.engine
+                .eval_ast_with_scope::<rhai::Dynamic>(&mut scope, &ast)
+        });
 
         let elapsed_ms = start.elapsed().as_millis() as i64;
 
@@ -302,6 +323,73 @@ impl RhaiToolRegistry {
     pub fn clear_cache(&mut self) {
         self.compiled_cache.clear();
         tracing::debug!("Cleared Rhai AST compilation cache");
+    }
+
+    /// Update an existing tool's script content and optionally its description.
+    /// Validates the new script, increments the version, updates the DB, and
+    /// invalidates the compilation cache so the next execution uses the new code.
+    pub async fn update_tool(
+        &mut self,
+        name: &str,
+        script_content: &str,
+        description: Option<&str>,
+        parameters: Option<Vec<ParameterDef>>,
+    ) -> Result<ToolRecord> {
+        // Validate: compile the new script to check for syntax errors
+        let ast = self
+            .engine
+            .compile(script_content)
+            .map_err(|e| anyhow::anyhow!("Script compilation failed: {}", e))?;
+
+        // Look up existing tool
+        let existing = self
+            .get_tool(name)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Tool not found: {}", name))?;
+
+        if existing.status == ToolStatus::Deprecated {
+            return Err(anyhow::anyhow!(
+                "Cannot update deprecated tool '{}'. Create a new tool instead.",
+                name
+            ));
+        }
+
+        // Increment version (e.g. "1.0.0" -> "1.1.0")
+        let new_version = increment_version(&existing.version);
+
+        // Build update query
+        let new_description = description.unwrap_or(&existing.description);
+        let new_params = match &parameters {
+            Some(p) => serde_json::to_string(p).context("Failed to serialize parameters")?,
+            None => serde_json::to_string(&existing.parameters)
+                .context("Failed to serialize parameters")?,
+        };
+
+        sqlx::query(
+            r#"
+            UPDATE tools
+            SET script_content = ?, description = ?, parameters = ?, version = ?
+            WHERE name = ? AND status != 'deprecated'
+            "#,
+        )
+        .bind(script_content)
+        .bind(new_description)
+        .bind(&new_params)
+        .bind(&new_version)
+        .bind(name)
+        .execute(&self.db)
+        .await
+        .context("Failed to update tool in database")?;
+
+        // Invalidate cache and store new AST
+        self.compiled_cache.insert(name.to_string(), Arc::new(ast));
+
+        tracing::info!("Updated dynamic tool '{}' to version {}", name, new_version);
+
+        // Return updated record
+        self.get_tool(name)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Tool disappeared after update"))
     }
 
     /// Get a summary of available tool names and descriptions (for system prompt).
@@ -461,7 +549,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_execute_tool() {
         let db = test_db().await;
         let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"));
@@ -479,7 +567,7 @@ mod tests {
         assert_eq!(result, "42");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_execute_tool_with_params() {
         let db = test_db().await;
         let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"));
@@ -596,7 +684,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("deprecated"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_usage_stats_updated() {
         let db = test_db().await;
         let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"));
@@ -642,7 +730,7 @@ mod tests {
         assert_eq!(summary[1].0, "beta");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_clear_cache() {
         let db = test_db().await;
         let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"));

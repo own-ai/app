@@ -2,7 +2,7 @@
 
 ## Current Work Focus
 
-The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**, and the **core of Phase 3 (Self-Programming)**. Steps 6-8 and 10 of Phase 3 are complete: the sandboxed Rhai scripting engine, Tool Registry with DB storage, RhaiExecuteTool bridge, and full agent integration with Tauri commands. The remaining Phase 3 work is Step 9 (Code Generation Agent) and Step 11 (Capability Detection). After that, Phase 4 (Deep Agent Features including Canvas) is next.
+The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**, and **Phase 3 (Self-Programming)** in full. All 11 steps of Phases 2-3 are complete. The next work is **Phase 4 (Deep Agent Features)** starting with Step 12 (Canvas System - Backend).
 
 ## What Has Been Built
 
@@ -32,40 +32,38 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 - **Filesystem Tools**: ls, read_file, write_file, edit_file, grep - with security (path traversal prevention), tests, and registered with agent
 - **Planning Tool**: write_todos with SharedTodoList, status tracking, markdown output, tests, and registered with agent
 - **Rhai Scripting Engine**: Sandboxed engine with 14 safe functions (HTTP, filesystem, JSON, regex, base64, URL encoding, datetime, notifications)
-- **Tool Registry**: RhaiToolRegistry with SQLite storage, AST caching, execution logging, usage stats tracking
+- **Tool Registry**: RhaiToolRegistry with SQLite storage, AST caching, execution logging, usage stats, update_tool with version increment
 - **RhaiExecuteTool**: rig Tool bridge that lets the LLM invoke dynamic Rhai tools by name
-- **Tool Commands**: 4 Tauri commands for dynamic tool management (list, create, delete, execute) via AgentCache
-- 23 registered Tauri commands (instances CRUD, providers, API keys, chat, memory stats, memory CRUD, dynamic tools)
+- **Self-Programming Tools**: CreateToolTool, ReadToolTool, UpdateToolTool - the agent can create, inspect, and iterate on dynamic Rhai tools
+- **Comprehensive System Prompt**: Includes self-programming instructions, Rhai language reference, tool iteration workflow
+- **Tool Commands**: 5 Tauri commands for dynamic tool management (list, create, update, delete, execute) via AgentCache
+- 24 registered Tauri commands (instances CRUD, providers, API keys, chat, memory stats, memory CRUD, dynamic tools)
 - AgentCache for multi-instance agent management
 - Workspace directory per instance at `~/.ownai/instances/{id}/workspace/`
 
 ## Recent Changes
 
-- **Test Organization**: Added `#[ignore]` to slow/external tests (5 fastembed tests in `long_term.rs`, 1 keychain test in `keychain.rs`). `cargo test` now runs only fast tests. `cargo test -- --ignored` runs slow tests. `ci.sh` supports `RUN_ALL_TESTS=1` flag. Documentation updated in README.md, AGENTS.md, and memory bank.
-- **Phase 3 Steps 6-8 + 10 COMPLETED**:
-  - Created `tools/rhai_engine.rs` with sandboxed Rhai engine (14 safe functions, security limits)
-  - Created `tools/registry.rs` with RhaiToolRegistry (register, execute, list, delete, cache, stats)
-  - Created `tools/rhai_bridge_tool.rs` with RhaiExecuteTool implementing rig::tool::Tool
-  - Added `tools` and `tool_executions` tables to database schema
-  - Integrated RhaiExecuteTool into agent's `create_tools()` with SharedRegistry
-  - Added `tool_registry: SharedRegistry` field to OwnAIAgent struct
-  - Created `commands/tools.rs` with 4 Tauri commands accessing registry per-instance via AgentCache
-  - Registered all commands in `lib.rs` (now 23 total)
-  - Added `regex` and `base64` crate dependencies, `blocking` feature for reqwest
-  - All 77 tests pass, cargo clippy clean, cargo fmt applied
+- **Phase 3 FULLY COMPLETED** (Steps 6-11):
+  - Step 9: Created `tools/code_generation.rs` with three rig Tools: `CreateToolTool`, `ReadToolTool`, `UpdateToolTool`
+  - Added `validate_script()` for Rhai compilation check + loop heuristic warnings
+  - Added `update_tool()` method and `increment_version()` to RhaiToolRegistry
+  - Integrated all 3 code generation tools into agent's `create_tools()` (10 tools total)
+  - Step 11: Completely rewrote `system_prompt()` with comprehensive self-programming instructions
+  - Added `update_dynamic_tool` Tauri command (5 tool commands, 24 total)
+  - Removed unused `engine()` accessor from registry.rs
+  - Fixed clippy warning: `&PathBuf` -> `&Path` in validate_script
+  - All 82 tests pass, cargo clippy clean, cargo fmt applied
 
 ## Next Steps
 
-### Near-term (Phase 3 remaining)
-- Step 9: Code Generation Agent (`tools/code_generation.rs`) - LLM generates Rhai scripts
-- Step 11: Capability Detection - system prompt enhancement for self-programming
-
-### Medium-term (Phase 4 - Deep Agent Features)
-- Canvas System (iframe-based HTML app rendering) - HIGH PRIORITY for use cases
-- Bridge API (postMessage communication between Canvas apps and backend)
-- Sub-Agent System (code-writer, researcher, memory-manager)
-- Scheduled Tasks (cron-like system with tokio-cron-scheduler)
-- Dynamic System Prompt with available tools listing
+### Near-term (Phase 4 - Deep Agent Features)
+- Step 12: Canvas System - Backend (program CRUD, file storage, DB tables)
+- Step 13: Canvas System - Custom Protocol (Tauri protocol for serving HTML)
+- Step 14: Canvas System - Frontend (iframe component, split-view, store)
+- Step 15: Bridge API (postMessage communication between Canvas and backend)
+- Step 16: Sub-Agent System (code-writer, researcher, memory-manager)
+- Step 17: Scheduled Tasks (tokio-cron-scheduler)
+- Step 18: Dynamic System Prompt (final integration with all capabilities)
 
 ### Later (Phase 5-7)
 - UI/UX refinement (message virtualization, Canvas split-view, ToolCallIndicator, TodoList rendering)
@@ -85,6 +83,8 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 - **Dynamic Tools**: SharedRegistry = `Arc<RwLock<RhaiToolRegistry>>` per agent instance for concurrent access
 - **Rhai Safety**: HTTPS-only HTTP, workspace-scoped filesystem, max operations limit, path traversal prevention
 - **Per-Instance Registry**: Tool commands access registry through AgentCache (not global Tauri state)
+- **Self-Programming Architecture**: Agent writes Rhai code directly and uses create_tool/read_tool/update_tool (not a separate LLM call within a tool)
+- **Tool Iteration**: Agent can read source code with read_tool, then fix/improve with update_tool (version auto-incremented)
 
 ## Important Patterns and Preferences
 
