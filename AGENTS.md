@@ -81,8 +81,14 @@ pnpm tauri dev
 # Build optimized production binary
 pnpm tauri build
 
-# Run all Rust tests
+# Run fast Rust tests (no external dependencies)
 cargo test
+
+# Run slow/external tests only (marked with #[ignore])
+cargo test -- --ignored
+
+# Run ALL tests (fast + slow)
+cargo test -- --include-ignored
 
 # Run tests for specific module
 cargo test memory::
@@ -98,6 +104,30 @@ pnpm tsc --noEmit
 
 # Frontend build only
 pnpm build
+
+# Local CI (all checks, fast tests only)
+./scripts/ci.sh
+
+# Local CI including slow/external tests
+RUN_ALL_TESTS=1 ./scripts/ci.sh
+```
+
+### Ignored Test Categories
+
+Some tests are marked with `#[ignore]` because they require external resources or are slow. They are skipped by default during `cargo test` and can be run selectively:
+
+```bash
+# fastembed tests (require ~1GB model download, slow initialization)
+cargo test long_term -- --ignored
+
+# OS keychain tests (require keychain access, not available in headless CI)
+cargo test keychain -- --ignored
+
+# LLM integration tests (require running LLM backend like Ollama)
+cargo test --test memory_integration -- --ignored
+
+# With specific LLM provider:
+TEST_LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-... cargo test --test memory_integration -- --ignored
 ```
 
 ## Project Structure

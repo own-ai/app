@@ -41,6 +41,7 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 
 ## Recent Changes
 
+- **Test Organization**: Added `#[ignore]` to slow/external tests (5 fastembed tests in `long_term.rs`, 1 keychain test in `keychain.rs`). `cargo test` now runs only fast tests. `cargo test -- --ignored` runs slow tests. `ci.sh` supports `RUN_ALL_TESTS=1` flag. Documentation updated in README.md, AGENTS.md, and memory bank.
 - **Phase 3 Steps 6-8 + 10 COMPLETED**:
   - Created `tools/rhai_engine.rs` with sandboxed Rhai engine (14 safe functions, security limits)
   - Created `tools/registry.rs` with RhaiToolRegistry (register, execute, list, delete, cache, stats)

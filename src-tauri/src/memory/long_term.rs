@@ -346,6 +346,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore] // Requires fastembed model download (slow, ~1GB)
     async fn test_delete_memory_entry() {
         let db = setup_test_db().await;
         let mut memory = LongTermMemory::new(db)
@@ -369,6 +370,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore] // Requires fastembed model download (slow, ~1GB)
     async fn test_search_by_type() {
         let db = setup_test_db().await;
         let mut memory = LongTermMemory::new(db)
@@ -407,6 +409,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore] // Requires fastembed model download (slow, ~1GB)
     async fn test_search_by_type_respects_limit() {
         let db = setup_test_db().await;
         let mut memory = LongTermMemory::new(db)
@@ -433,6 +436,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore] // Requires fastembed model download (slow, ~1GB)
     async fn test_count() {
         let db = setup_test_db().await;
         let mut memory = LongTermMemory::new(db)
@@ -461,6 +465,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore] // Requires fastembed model download (slow, ~1GB)
     async fn test_search_by_type_empty_result() {
         let db = setup_test_db().await;
         let memory = LongTermMemory::new(db)

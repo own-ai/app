@@ -61,8 +61,19 @@ pnpm dev
 # Build production binary
 pnpm tauri build
 
-# Rust tests
+# Rust tests (fast, no external dependencies)
 cargo test
+
+# Slow/external tests only (marked with #[ignore])
+cargo test -- --ignored
+
+# ALL tests (fast + slow)
+cargo test -- --include-ignored
+
+# Specific ignored test categories:
+cargo test long_term -- --ignored        # fastembed/embedding tests (~1GB model)
+cargo test keychain -- --ignored         # OS keychain tests
+cargo test --test memory_integration -- --ignored  # LLM integration tests
 
 # Rust linting
 cargo clippy
@@ -72,6 +83,12 @@ cargo fmt
 
 # TypeScript type-check
 pnpm tsc --noEmit
+
+# Local CI (all checks, fast tests only)
+./scripts/ci.sh
+
+# Local CI including slow/external tests
+RUN_ALL_TESTS=1 ./scripts/ci.sh
 ```
 
 ### Database

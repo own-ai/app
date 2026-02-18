@@ -56,6 +56,12 @@ print_step "Backend: Tests"
 cargo test
 print_success "Tests passed"
 
+if [ "$RUN_ALL_TESTS" = "1" ]; then
+    print_step "Backend: Ignored Tests (fastembed, keychain, integration)"
+    cargo test -- --ignored
+    print_success "Ignored tests passed"
+fi
+
 cd ..
 
 # Summary

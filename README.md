@@ -72,11 +72,28 @@ pnpm tauri dev
 # Build for production
 pnpm tauri build
 
-# Run Rust tests
+# Run Rust tests (fast, no external dependencies)
 cargo test
+
+# Run slow/external tests (fastembed model, OS keychain, LLM integration)
+cargo test -- --ignored
+
+# Run ALL tests (fast + slow)
+cargo test -- --include-ignored
+
+# Run only specific ignored test categories
+cargo test long_term -- --ignored        # fastembed/embedding tests
+cargo test keychain -- --ignored         # OS keychain tests
+cargo test --test memory_integration -- --ignored  # LLM integration tests
 
 # Lint Rust code
 cargo clippy
+
+# Local CI (all checks)
+./scripts/ci.sh
+
+# Local CI including slow tests
+RUN_ALL_TESTS=1 ./scripts/ci.sh
 ```
 
 ## Architecture Overview

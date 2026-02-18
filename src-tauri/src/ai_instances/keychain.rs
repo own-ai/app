@@ -72,24 +72,13 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore] // Requires OS keychain access (not available in headless CI)
     fn test_api_key_storage() {
         let provider = LLMProvider::Anthropic;
         let api_key = "test-api-key-secret";
 
-        // Save - skip test if no keyring service available (e.g., in CI)
-        match APIKeyStorage::save(&provider, api_key) {
-            Err(e) => {
-                let error_msg = format!("{:?}", e);
-                if error_msg.contains("Platform secure storage failure")
-                    || error_msg.contains("org.freedesktop.secrets")
-                {
-                    eprintln!("Skipping test: no keyring service available ({})", e);
-                    return;
-                }
-                panic!("Unexpected error during save: {}", e);
-            }
-            Ok(_) => {}
-        }
+        // Save
+        APIKeyStorage::save(&provider, api_key).unwrap();
 
         // Load
         let loaded = APIKeyStorage::load(&provider).unwrap();
