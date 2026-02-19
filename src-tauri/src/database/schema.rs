@@ -101,6 +101,36 @@ pub async fn create_tables(pool: &Pool<Sqlite>) -> Result<()> {
     .await
     .context("Failed to create tool_executions index")?;
 
+    // Canvas programs table
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS programs (
+            id TEXT PRIMARY KEY,
+            instance_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            version TEXT NOT NULL DEFAULT '1.0.0',
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            UNIQUE(instance_id, name)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create programs table")?;
+
+    // Index for programs by instance_id
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_programs_instance_id
+        ON programs(instance_id)
+        "#,
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create programs index")?;
+
     tracing::debug!("Database tables created successfully");
 
     Ok(())

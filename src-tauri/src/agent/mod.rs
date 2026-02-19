@@ -13,6 +13,10 @@ use sqlx::{Pool, Row, Sqlite};
 use std::path::PathBuf;
 
 use crate::ai_instances::{AIInstance, APIKeyStorage, LLMProvider};
+use crate::canvas::tools::{
+    CreateProgramTool, ListProgramsTool, ProgramEditFileTool, ProgramLsTool, ProgramReadFileTool,
+    ProgramWriteFileTool,
+};
 use crate::memory::{
     fact_extraction, working_memory::Message, ContextBuilder, FactExtractionResponse,
     LongTermMemory, SessionSummary, SummarizationAgent, SummaryResponse, WorkingMemory,
@@ -61,6 +65,8 @@ fn create_tools(
     todo_list: SharedTodoList,
     registry: SharedRegistry,
     available_dynamic_tools: Vec<(String, String)>,
+    db: Pool<Sqlite>,
+    programs_root: PathBuf,
 ) -> Vec<Box<dyn ToolDyn>> {
     let workspace =
         paths::get_instance_workspace_path(instance_id).unwrap_or_else(|_| PathBuf::from("."));
@@ -83,6 +89,25 @@ fn create_tools(
         Box::new(CreateToolTool::new(registry.clone(), workspace.clone())),
         Box::new(ReadToolTool::new(registry.clone())),
         Box::new(UpdateToolTool::new(registry, workspace)),
+        // Canvas program tools
+        Box::new(CreateProgramTool::new(
+            db.clone(),
+            instance_id.to_string(),
+            programs_root.clone(),
+        )),
+        Box::new(ListProgramsTool::new(db.clone(), instance_id.to_string())),
+        Box::new(ProgramLsTool::new(programs_root.clone())),
+        Box::new(ProgramReadFileTool::new(programs_root.clone())),
+        Box::new(ProgramWriteFileTool::new(
+            db.clone(),
+            instance_id.to_string(),
+            programs_root.clone(),
+        )),
+        Box::new(ProgramEditFileTool::new(
+            db,
+            instance_id.to_string(),
+            programs_root,
+        )),
     ];
 
     tools
@@ -203,6 +228,10 @@ impl OwnAIAgent {
         let tool_registry: SharedRegistry =
             std::sync::Arc::new(tokio::sync::RwLock::new(rhai_registry));
 
+        // Resolve programs root for canvas tools
+        let programs_root = paths::get_instance_programs_path(&instance.id)
+            .unwrap_or_else(|_| PathBuf::from("./programs"));
+
         // Create provider-specific agent with tools, summary extractor, and fact extractor
         let (agent, summary_extractor, fact_extractor) = match instance.provider {
             LLMProvider::Anthropic => {
@@ -213,6 +242,8 @@ impl OwnAIAgent {
                     todo_list.clone(),
                     tool_registry.clone(),
                     available_dynamic_tools.clone(),
+                    db.clone(),
+                    programs_root.clone(),
                 );
 
                 let agent = client
@@ -250,6 +281,8 @@ impl OwnAIAgent {
                     todo_list.clone(),
                     tool_registry.clone(),
                     available_dynamic_tools.clone(),
+                    db.clone(),
+                    programs_root.clone(),
                 );
 
                 let agent = openai_client
@@ -296,6 +329,8 @@ impl OwnAIAgent {
                     todo_list.clone(),
                     tool_registry.clone(),
                     available_dynamic_tools.clone(),
+                    db.clone(),
+                    programs_root.clone(),
                 );
 
                 let agent = ollama_client
@@ -684,6 +719,38 @@ To create a tool that fetches a URL and extracts the title:
 1. Call create_tool with name="fetch_title", description="Fetches a URL and returns the page title"
 2. Script: `let params = json_parse(params_json); let body = http_get(params["url"]); let matches = regex_match(body, "<title>(.*?)</title>"); if matches.len() > 0 {{ matches[0] }} else {{ "No title found" }}`
 3. Parameters: [{{"name": "url", "type_hint": "string", "description": "URL to fetch", "required": true}}]
+
+## Canvas Programs (Visual Apps)
+
+You can create interactive HTML/CSS/JS applications that the user can see and interact with in an embedded view. These are called "Programs."
+
+### Canvas Tools
+- **create_program**: Create a new program with an initial index.html
+- **list_programs**: List all programs you have created
+- **program_ls**: List files within a program directory
+- **program_read_file**: Read the contents of a file in a program
+- **program_write_file**: Write/create a file in a program (bumps version)
+- **program_edit_file**: Edit a file with search/replace (bumps version)
+
+### When to Create a Program
+- The user needs a visual interface (dashboard, form, game, chart)
+- A task benefits from interactive HTML rather than plain text
+- The user asks you to "show", "display", or "build" something visual
+- Examples: chess board, expense tracker, data dashboard, quiz app
+
+### How to Create a Program
+1. Call `create_program` with a descriptive name, description, and initial HTML
+2. The HTML should be a complete, self-contained page (inline CSS/JS or use separate files)
+3. Use `program_write_file` to add CSS, JavaScript, or other files
+4. Use `program_edit_file` for targeted modifications to existing files
+5. Use `program_read_file` to inspect current file contents before editing
+
+### Best Practices
+- Use semantic, lowercase names with hyphens (e.g. "expense-tracker", "chess-board")
+- Start with a working index.html, then iterate
+- For complex apps, separate HTML, CSS, and JS into different files
+- Each write or edit automatically increments the program version
+- The user can view the program in a Canvas iframe beside the chat
 
 ## Memory System
 

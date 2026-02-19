@@ -43,3 +43,16 @@ pub fn get_instance_workspace_path(instance_id: &str) -> Result<PathBuf> {
     std::fs::create_dir_all(&path).context("Failed to create workspace directory")?;
     Ok(path)
 }
+
+/// Get the programs directory for a specific instance
+pub fn get_instance_programs_path(instance_id: &str) -> Result<PathBuf> {
+    let path = get_instances_path()?.join(instance_id).join("programs");
+    std::fs::create_dir_all(&path).context("Failed to create programs directory")?;
+    Ok(path)
+}
+
+/// Get the directory for a specific program within an instance
+pub fn get_program_path(instance_id: &str, program_name: &str) -> Result<PathBuf> {
+    let path = get_instance_programs_path(instance_id)?.join(program_name);
+    Ok(path)
+}

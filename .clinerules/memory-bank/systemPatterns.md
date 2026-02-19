@@ -101,11 +101,12 @@ Two stores:
 ```
 OwnAIAgent
 ├── model (rig-core Agent - Anthropic, OpenAI, or Ollama)
-├── tools (10 total):
+├── tools (16 total):
 │   ├── Filesystem: ls, read_file, write_file, edit_file, grep
 │   ├── Planning: write_todos
 │   ├── Dynamic: execute_dynamic_tool (Rhai bridge)
-│   └── Self-Programming: create_tool, read_tool, update_tool
+│   ├── Self-Programming: create_tool, read_tool, update_tool
+│   └── Canvas: create_program, list_programs, program_ls, program_read_file, program_write_file, program_edit_file
 ├── working_memory (VecDeque<Message>)
 ├── summarization (SummarizationAgent)
 ├── long_term_memory (LongTermMemory with fastembed)
@@ -126,13 +127,14 @@ OwnAIAgent
 - Avoids re-creating agents on every request
 
 #### Command Pattern (Tauri)
-- 24 registered commands grouped by domain:
+- 27 registered commands grouped by domain:
   - **Instances**: create, list, delete, set_active, get_active
   - **Providers**: get_providers
   - **API Keys**: save_api_key, has_api_key, delete_api_key
   - **Chat**: send_message, stream_message, load_messages, clear_agent_cache
   - **Memory**: get_memory_stats, search_memory, add_memory_entry, delete_memory_entry
   - **Dynamic Tools**: list_dynamic_tools, create_dynamic_tool, update_dynamic_tool, delete_dynamic_tool, execute_dynamic_tool
+  - **Canvas Programs**: list_programs, delete_program, get_program_url
 - All commands are async, return `Result<T, String>`
 - State accessed via `tauri::State<Arc<Mutex<T>>>`
 
@@ -240,6 +242,18 @@ CREATE TABLE tool_executions (
     output TEXT,
     FOREIGN KEY (tool_id) REFERENCES tools(id)
 );
+
+CREATE TABLE programs (
+    id TEXT PRIMARY KEY,
+    instance_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    version TEXT NOT NULL DEFAULT '1.0.0',
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE(instance_id, name)
+);
+CREATE INDEX idx_programs_instance ON programs(instance_id);
 ```
 
 ## Implemented: Self-Programming Level 1 (Rhai Tools)
@@ -251,14 +265,28 @@ The agent can create, read, update, and execute dynamic Rhai tools:
 - **Self-Programming Tools**: CreateToolTool, ReadToolTool, UpdateToolTool - agent writes Rhai code and iterates
 - **Comprehensive System Prompt**: Includes self-programming instructions, Rhai language reference, and tool iteration workflow
 
+## Implemented: Self-Programming Level 2 (Canvas Programs)
+
+The agent can create and manage interactive HTML/CSS/JS applications:
+- **Canvas Module** (`canvas/`): 4-file structure - mod.rs (path resolution + security), storage.rs (DB CRUD), protocol.rs (URL parsing + file serving), tools.rs (6 rig Tools)
+- **6 Canvas Tools**: create_program, list_programs, program_ls, program_read_file, program_write_file, program_edit_file
+- **Custom Protocol**: `ownai-program://localhost/{instance_id}/{program_name}/{path}` for serving files
+- **Program Identity**: By name (not UUID), chosen by the agent; agent does NOT know its instance_id
+- **Filesystem-like Tools**: Write and edit files within program directories (not monolithic save/update)
+- **Version Tracking**: Each write/edit automatically increments the program version (semver patch bump)
+- **Security**: Path traversal prevention, program name validation
+- **Storage**: Programs table in SQLite + files at `~/.ownai/instances/{id}/programs/{program_name}/`
+- **3 Tauri Commands**: list_programs, delete_program, get_program_url
+
 ## Planned Architecture (Not Yet Implemented)
 
-### Self-Programming Level 2: Programs (Canvas/HTML Apps)
-- LLM generates HTML/CSS/JS single-page apps
-- Rendered in sandboxed iframe ("Canvas")
-- Bridge API via postMessage for backend communication
+### Canvas Frontend
+- Sandboxed iframe rendering Canvas programs
 - Split-view layout: Chat + Canvas side by side
-- Programs stored at `~/.ownai/instances/{id}/programs/`
+- Canvas view toggle (split-view / fullscreen)
+
+### Bridge API (for Canvas Programs)
+- postMessage communication between Canvas iframe and backend
 
 ### Deep Agent System (Remaining)
 - **Sub-Agents**: Specialized agents (code-writer, researcher, memory-manager)
@@ -282,11 +310,12 @@ window.ownai = {
 ~/.ownai/
   instances/
     {instance-id}/
-      ownai.db              # SQLite: messages, summaries, memory, user_profile
+      ownai.db              # SQLite: messages, summaries, memory, user_profile, tools, programs
       workspace/             # Agent workspace directory (for filesystem tools)
-      tools/scripts/*.rhai   # Generated Rhai tools (planned)
-      programs/              # Generated HTML apps (planned)
-        {app-name}/
+      programs/              # Generated HTML apps (Canvas)
+        {program-name}/
           index.html
-          metadata.json
+          style.css
+          app.js
+          ...
 ```

@@ -2,7 +2,7 @@
 
 ## Current Work Focus
 
-The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**, and **Phase 3 (Self-Programming)** in full. All 11 steps of Phases 2-3 are complete. The next work is **Phase 4 (Deep Agent Features)** starting with Step 12 (Canvas System - Backend).
+The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**, **Phase 3 (Self-Programming)**, and **Steps 12-13 of Phase 4 (Canvas System Backend + Custom Protocol)**. The next work is **Phase 4, Step 14 (Canvas System - Frontend)**.
 
 ## What Has Been Built
 
@@ -22,7 +22,7 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 - OwnAIAgent with rig-core 0.30 integration (Anthropic, OpenAI, Ollama providers)
 - Multi-turn tool calling support (up to 50 turns)
 - Streaming chat via Tauri events (`agent:token`) with multi-turn stream processing
-- SQLite database with schema (messages, user_profile, tools, tool_executions; summaries and memory_entries created dynamically)
+- SQLite database with schema (messages, user_profile, tools, tool_executions, programs; summaries and memory_entries created dynamically)
 - AI Instance Manager with per-instance databases at `~/.ownai/instances/{id}/`
 - API key storage via OS keychain (keyring crate)
 - Working Memory (VecDeque with configurable token budget, default 50000 tokens, 30% eviction)
@@ -35,30 +35,37 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 - **Tool Registry**: RhaiToolRegistry with SQLite storage, AST caching, execution logging, usage stats, update_tool with version increment
 - **RhaiExecuteTool**: rig Tool bridge that lets the LLM invoke dynamic Rhai tools by name
 - **Self-Programming Tools**: CreateToolTool, ReadToolTool, UpdateToolTool - the agent can create, inspect, and iterate on dynamic Rhai tools
-- **Comprehensive System Prompt**: Includes self-programming instructions, Rhai language reference, tool iteration workflow
+- **Canvas System (Backend)**: 6 agent tools for creating/managing HTML programs, DB table, filesystem storage at `~/.ownai/instances/{id}/programs/`
+- **Canvas Custom Protocol**: `ownai-program://` URI scheme for serving program files from local filesystem
+- **Canvas Tauri Commands**: list_programs, delete_program, get_program_url (3 commands)
+- **Comprehensive System Prompt**: Includes self-programming instructions, Rhai language reference, Canvas programs section, tool iteration workflow
 - **Tool Commands**: 5 Tauri commands for dynamic tool management (list, create, update, delete, execute) via AgentCache
-- 24 registered Tauri commands (instances CRUD, providers, API keys, chat, memory stats, memory CRUD, dynamic tools)
+- 27 registered Tauri commands (instances CRUD, providers, API keys, chat, memory stats, memory CRUD, dynamic tools, canvas programs)
 - AgentCache for multi-instance agent management
 - Workspace directory per instance at `~/.ownai/instances/{id}/workspace/`
+- Programs directory per instance at `~/.ownai/instances/{id}/programs/`
 
 ## Recent Changes
 
-- **Phase 3 FULLY COMPLETED** (Steps 6-11):
-  - Step 9: Created `tools/code_generation.rs` with three rig Tools: `CreateToolTool`, `ReadToolTool`, `UpdateToolTool`
-  - Added `validate_script()` for Rhai compilation check + loop heuristic warnings
-  - Added `update_tool()` method and `increment_version()` to RhaiToolRegistry
-  - Integrated all 3 code generation tools into agent's `create_tools()` (10 tools total)
-  - Step 11: Completely rewrote `system_prompt()` with comprehensive self-programming instructions
-  - Added `update_dynamic_tool` Tauri command (5 tool commands, 24 total)
-  - Removed unused `engine()` accessor from registry.rs
-  - Fixed clippy warning: `&PathBuf` -> `&Path` in validate_script
-  - All 82 tests pass, cargo clippy clean, cargo fmt applied
+- **Steps 12-13 COMPLETED** (Canvas System Backend + Custom Protocol):
+  - Added `programs` table to DB schema with UNIQUE(instance_id, name) constraint
+  - Added `get_instance_programs_path()` and `get_program_path()` to utils/paths.rs
+  - Created `canvas/` module with 4 files: mod.rs (path resolution + security), storage.rs (DB CRUD), protocol.rs (URL parsing + file serving), tools.rs (6 rig Tools)
+  - 6 Canvas agent tools: create_program, list_programs, program_ls, program_read_file, program_write_file, program_edit_file
+  - Tools use `#[serde(skip)]` for non-serializable fields (Pool, PathBuf, etc.)
+  - Programs identified by name (not UUID), chosen by the agent
+  - Agent does NOT know its instance_id - embedded at tool construction time
+  - Registered `ownai-program://` custom protocol via `register_asynchronous_uri_scheme_protocol`
+  - Protocol parses URLs as `ownai-program://localhost/{instance_id}/{program_name}/{path}`
+  - MIME type detection for 18 file extensions (HTML, CSS, JS, images, fonts, etc.)
+  - 3 Canvas Tauri commands: list_programs, delete_program, get_program_url
+  - Updated `create_tools()` to accept `db` and `programs_root` params and include 6 canvas tools (16 tools total)
+  - Updated system prompt with Canvas Programs section
+  - All 115 tests pass, cargo clippy clean, cargo fmt applied
 
 ## Next Steps
 
 ### Near-term (Phase 4 - Deep Agent Features)
-- Step 12: Canvas System - Backend (program CRUD, file storage, DB tables)
-- Step 13: Canvas System - Custom Protocol (Tauri protocol for serving HTML)
 - Step 14: Canvas System - Frontend (iframe component, split-view, store)
 - Step 15: Bridge API (postMessage communication between Canvas and backend)
 - Step 16: Sub-Agent System (code-writer, researcher, memory-manager)
@@ -85,6 +92,8 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 - **Per-Instance Registry**: Tool commands access registry through AgentCache (not global Tauri state)
 - **Self-Programming Architecture**: Agent writes Rhai code directly and uses create_tool/read_tool/update_tool (not a separate LLM call within a tool)
 - **Tool Iteration**: Agent can read source code with read_tool, then fix/improve with update_tool (version auto-incremented)
+- **Canvas Programs**: Identified by name (not UUID), filesystem-like tools, agent does not know instance_id
+- **Canvas Protocol**: `ownai-program://localhost/{instance_id}/{program_name}/{path}` for serving files
 
 ## Important Patterns and Preferences
 
@@ -96,3 +105,4 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 - CSS variables for theming, Tailwind for utility classes
 - Agent uses `process_stream!` macro for uniform streaming across providers
 - Rhai scripts receive parameters via `params_json` scope variable (parsed with `json_parse()`)
+- Canvas tools use `#[serde(skip)]` pattern for non-serializable fields (Pool, PathBuf)

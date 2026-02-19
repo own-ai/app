@@ -5,7 +5,7 @@
 **Phase 1 (Foundation)**: Complete
 **Phase 2 (Memory System)**: Complete
 **Phase 3 (Self-Programming / Rhai)**: Complete
-**Phase 4 (Deep Agent Features)**: Not started (next: Step 12 Canvas System - Backend)
+**Phase 4 (Deep Agent Features)**: Steps 12-13 complete (Canvas Backend + Protocol), next: Step 14 (Canvas Frontend)
 **Phase 5-7 (Polish, Testing, Release)**: Not started
 
 ## What Works
@@ -32,40 +32,38 @@
 - [x] OwnAIAgent with rig-core 0.30 (supports Anthropic, OpenAI, Ollama)
 - [x] Streaming chat via `agent:token` events with multi-turn support
 - [x] Multi-turn tool calling (MAX_TOOL_TURNS = 50)
-- [x] SQLite database with migrations (messages, user_profile, tools, tool_executions; summaries + memory_entries created dynamically)
+- [x] SQLite database with migrations (messages, user_profile, tools, tool_executions, programs; summaries + memory_entries created dynamically)
 - [x] AI Instance Manager (create, list, update, delete instances)
 - [x] Per-instance databases at `~/.ownai/instances/{id}/ownai.db`
 - [x] API key storage via OS keychain (keyring crate)
 - [x] AgentCache for lazy agent initialization per instance
-- [x] 24 Tauri commands registered and functional
+- [x] 27 Tauri commands registered and functional
 - [x] Working Memory with VecDeque and token budget (50000 tokens default, 30% eviction)
 - [x] Summarization via LLM Extractor (rig Extractor with SummaryResponse JsonSchema struct)
 - [x] Long-term Memory with fastembed (local Qwen3-Embedding-0.6B embeddings)
 - [x] Context Builder (assembles context from all memory tiers)
 - [x] Filesystem Tools (ls, read_file, write_file, edit_file, grep) with tests
 - [x] Planning Tool (write_todos with SharedTodoList) with tests
-- [x] Tools registered with agent via create_tools() helper
+- [x] Tools registered with agent via create_tools() helper (16 tools total)
 - [x] process_stream! macro for uniform streaming across providers
 - [x] Path utilities for cross-platform file management
 - [x] Workspace directory per instance at `~/.ownai/instances/{id}/workspace/`
+- [x] Programs directory per instance at `~/.ownai/instances/{id}/programs/`
 - [x] Tracing/logging setup
 - [x] Sandboxed Rhai scripting engine (14 safe functions, security limits)
 - [x] Tool Registry (RhaiToolRegistry with SQLite, AST caching, execution logging, usage stats)
 - [x] RhaiExecuteTool bridge (rig Tool -> Rhai script execution)
 - [x] Dynamic tool Tauri commands (list, create, update, delete, execute via AgentCache)
 - [x] Self-programming tools (CreateToolTool, ReadToolTool, UpdateToolTool)
-- [x] Comprehensive system prompt with self-programming instructions and Rhai reference
+- [x] Comprehensive system prompt with self-programming instructions, Rhai reference, and Canvas section
+- [x] Canvas System backend (6 agent tools, DB table, filesystem storage)
+- [x] Canvas Custom Protocol (`ownai-program://` URI scheme for serving files)
+- [x] Canvas Tauri commands (list_programs, delete_program, get_program_url)
 
 ## What's Left to Build
 
 ### Phase 4 - Deep Agent Features
-- [ ] **Canvas System**: iframe-based HTML app rendering
-  - [ ] Canvas backend (program CRUD, file storage, DB tables)
-  - [ ] Custom Protocol (Tauri protocol for serving HTML)
-  - [ ] Canvas component in frontend
-  - [ ] Split-view layout (Chat + Canvas)
-  - [ ] Program storage at `~/.ownai/instances/{id}/programs/`
-  - [ ] Program iteration via chat
+- [ ] **Canvas System - Frontend**: iframe component, split-view layout, program store
 - [ ] **Bridge API**: postMessage communication between Canvas apps and backend
   - [ ] chat(), storeData(), loadData(), notify(), readFile(), writeFile()
 - [ ] **Sub-Agent System**: TaskTool for delegating to specialized sub-agents
@@ -126,3 +124,5 @@
 9. **Rhai Safe Functions**: Expanded from 6 to 14 functions after reviewing use cases (added regex, base64, url_encode, datetime, notification, flexible http_request with headers)
 10. **Per-Instance Tool Registry**: Tool commands access registry through AgentCache (not global Tauri state) for proper isolation
 11. **Self-Programming Architecture**: Agent writes Rhai code directly and uses create_tool/read_tool/update_tool instead of a separate CodeGenerationAgent with internal LLM calls
+12. **Canvas Program Identity**: Programs identified by name (not UUID), chosen by the agent, similar to dynamic Rhai tools
+13. **Canvas Tool Design**: Filesystem-like tools (program_write_file, program_edit_file) instead of monolithic save/update, agent does not know instance_id

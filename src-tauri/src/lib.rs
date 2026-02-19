@@ -1,6 +1,7 @@
 // Modules
 pub mod agent;
 pub mod ai_instances;
+pub mod canvas;
 pub mod commands;
 pub mod database;
 pub mod memory;
@@ -12,6 +13,9 @@ use std::sync::Arc;
 use tauri::Manager;
 use tokio::sync::Mutex;
 
+use canvas::protocol;
+use utils::paths;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize logging
@@ -19,6 +23,63 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .register_asynchronous_uri_scheme_protocol("ownai-program", |_ctx, request, responder| {
+            // Custom protocol handler for serving Canvas program files.
+            // All file I/O here is synchronous (std::fs::read), which is fine
+            // for serving local program files.
+            let url = request.uri().to_string();
+
+            let (instance_id, program_name, file_path) = match protocol::parse_protocol_url(&url) {
+                Ok(parsed) => parsed,
+                Err(e) => {
+                    tracing::warn!("Invalid protocol URL '{}': {}", url, e);
+                    let response = tauri::http::Response::builder()
+                        .status(400)
+                        .body(format!("Bad Request: {}", e).into_bytes())
+                        .unwrap();
+                    responder.respond(response);
+                    return;
+                }
+            };
+
+            let programs_root = match paths::get_instance_programs_path(&instance_id) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!("Failed to get programs path: {}", e);
+                    let response = tauri::http::Response::builder()
+                        .status(500)
+                        .body(b"Internal Server Error".to_vec())
+                        .unwrap();
+                    responder.respond(response);
+                    return;
+                }
+            };
+
+            match protocol::load_program_file(&programs_root, &program_name, &file_path) {
+                Ok((bytes, mime)) => {
+                    let response = tauri::http::Response::builder()
+                        .status(200)
+                        .header("Content-Type", &mime)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(bytes)
+                        .unwrap();
+                    responder.respond(response);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to load program file '{}/{}': {}",
+                        program_name,
+                        file_path,
+                        e
+                    );
+                    let response = tauri::http::Response::builder()
+                        .status(404)
+                        .body(format!("Not Found: {}", e).into_bytes())
+                        .unwrap();
+                    responder.respond(response);
+                }
+            }
+        })
         .setup(|app| {
             // Initialize AI Instance Manager
             let manager = ai_instances::AIInstanceManager::new()
@@ -60,6 +121,10 @@ pub fn run() {
             commands::tools::update_dynamic_tool,
             commands::tools::delete_dynamic_tool,
             commands::tools::execute_dynamic_tool,
+            // Canvas Programs
+            commands::canvas::list_programs,
+            commands::canvas::delete_program,
+            commands::canvas::get_program_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
