@@ -66,10 +66,6 @@ pub struct AIInstance {
     #[serde(skip)]
     pub db_path: Option<PathBuf>,
 
-    /// Path to instance tools directory
-    #[serde(skip)]
-    pub tools_path: Option<PathBuf>,
-
     pub created_at: DateTime<Utc>,
     pub last_active: DateTime<Utc>,
 }

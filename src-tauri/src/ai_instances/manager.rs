@@ -1,7 +1,6 @@
 use super::models::{AIInstance, LLMProvider};
 use crate::utils::paths::{
-    get_config_path, get_instance_db_path, get_instance_tools_path, get_instance_workspace_path,
-    get_instances_path,
+    get_config_path, get_instance_db_path, get_instance_workspace_path, get_instances_path,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -39,7 +38,6 @@ impl AIInstanceManager {
 
         // Get paths for this instance
         let db_path = get_instance_db_path(&id)?;
-        let tools_path = get_instance_tools_path(&id)?;
 
         let instance = AIInstance {
             id: id.clone(),
@@ -48,7 +46,6 @@ impl AIInstanceManager {
             model,
             api_base_url,
             db_path: Some(db_path),
-            tools_path: Some(tools_path),
             created_at: now,
             last_active: now,
         };
@@ -147,12 +144,7 @@ impl AIInstanceManager {
         fs::create_dir_all(&base_path).context("Failed to create instance directory")?;
 
         // Create subdirectories
-        get_instance_tools_path(id)?;
         get_instance_workspace_path(id)?;
-
-        // Create tools/scripts subdirectory
-        fs::create_dir_all(base_path.join("tools/scripts"))
-            .context("Failed to create tools/scripts directory")?;
 
         tracing::debug!("Created directories for instance: {}", id);
 

@@ -57,7 +57,6 @@ fn create_test_instance() -> AIInstance {
         model,
         api_base_url: test_base_url(),
         db_path: None,
-        tools_path: None,
         created_at: Utc::now(),
         last_active: Utc::now(),
     }
