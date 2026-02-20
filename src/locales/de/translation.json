@@ -65,6 +65,20 @@
     "api_key_empty": "Bitte gib einen API-Schlüssel ein",
     "about": "Über"
   },
+  "canvas": {
+    "programs": "Programme",
+    "no_programs": "Noch keine Programme. Bitte deine KI, eins zu erstellen.",
+    "open_program": "Öffnen",
+    "delete_program": "Programm löschen",
+    "confirm_delete": "Programm \"{{name}}\" löschen? Das kann nicht rückgängig gemacht werden.",
+    "close_canvas": "Programm schließen",
+    "fullscreen": "Vollbild",
+    "exit_fullscreen": "Vollbild verlassen",
+    "version": "v{{version}}",
+    "loading_program": "Programm wird geladen...",
+    "program_list": "Programm auswählen",
+    "toggle_canvas": "Programm umschalten"
+  },
   "errors": {
     "generic": "Etwas ist schiefgelaufen. Bitte versuche es erneut.",
     "network": "Netzwerkfehler. Bitte überprüfe deine Verbindung.",

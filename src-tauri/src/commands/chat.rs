@@ -2,7 +2,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 use tokio::sync::Mutex;
 
 use crate::agent::OwnAIAgent;
@@ -31,6 +31,7 @@ pub type AgentCache = Arc<Mutex<HashMap<String, OwnAIAgent>>>;
 #[tauri::command]
 pub async fn send_message(
     request: SendMessageRequest,
+    app_handle: tauri::AppHandle,
     instance_manager: State<'_, Arc<Mutex<AIInstanceManager>>>,
     agent_cache: State<'_, AgentCache>,
 ) -> Result<Message, String> {
@@ -52,7 +53,7 @@ pub async fn send_message(
             .map_err(|e| format!("Failed to initialize database: {}", e))?;
 
         // Create new agent
-        let agent = OwnAIAgent::new(&instance, db, None)
+        let agent = OwnAIAgent::new(&instance, db, None, Some(app_handle.clone()))
             .await
             .map_err(|e| format!("Failed to create agent: {}", e))?;
 
@@ -113,7 +114,7 @@ pub async fn stream_message(
             .map_err(|e| format!("Failed to initialize database: {}", e))?;
 
         // Create new agent
-        let agent = OwnAIAgent::new(&instance, db, None)
+        let agent = OwnAIAgent::new(&instance, db, None, Some(window.app_handle().clone()))
             .await
             .map_err(|e| format!("Failed to create agent: {}", e))?;
 

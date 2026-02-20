@@ -2,7 +2,7 @@
 
 ## Current Work Focus
 
-The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**, **Phase 3 (Self-Programming)**, and **Steps 12-13 of Phase 4 (Canvas System Backend + Custom Protocol)**. The next work is **Phase 4, Step 14 (Canvas System - Frontend)**.
+The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**, **Phase 3 (Self-Programming)**, and **Steps 12-14 of Phase 4 (Canvas System Backend + Custom Protocol + Frontend)**. Additional features have been added: **open_program tool** and **auto-reload on program updates**. The next work is **Phase 4, Step 15 (Bridge API)**.
 
 ## What Has Been Built
 
@@ -13,10 +13,11 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 - Auto-growing message input with Enter/Shift+Enter behavior
 - AI Instance selector and creation dialog
 - Settings panel for provider/model/API key configuration
-- Header with search icon, settings, and instance selector
+- Header with search icon, Canvas toggle, settings, and instance selector
 - i18n system with German and English translations
 - Full design system implemented in CSS (light + dark mode via prefers-color-scheme, CSS variables, animations)
-- Zustand stores for chat state and instance state
+- Zustand stores for chat state, instance state, and canvas state
+- **Canvas Frontend**: Split-view layout (chat + canvas), sandboxed iframe, program list, auto-detection of new programs
 
 ### Backend (Rust + Tauri 2.0)
 - OwnAIAgent with rig-core 0.30 integration (Anthropic, OpenAI, Ollama providers)
@@ -47,33 +48,43 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 
 ## Recent Changes
 
-- **Steps 12-13 COMPLETED** (Canvas System Backend + Custom Protocol):
-  - Added `programs` table to DB schema with UNIQUE(instance_id, name) constraint
-  - Added `get_instance_programs_path()` and `get_program_path()` to utils/paths.rs
-  - Created `canvas/` module with 4 files: mod.rs (path resolution + security), storage.rs (DB CRUD), protocol.rs (URL parsing + file serving), tools.rs (6 rig Tools)
-  - 6 Canvas agent tools: create_program, list_programs, program_ls, program_read_file, program_write_file, program_edit_file
-  - Tools use `#[serde(skip)]` for non-serializable fields (Pool, PathBuf, etc.)
-  - Programs identified by name (not UUID), chosen by the agent
-  - Agent does NOT know its instance_id - embedded at tool construction time
-  - Registered `ownai-program://` custom protocol via `register_asynchronous_uri_scheme_protocol`
-  - Protocol parses URLs as `ownai-program://localhost/{instance_id}/{program_name}/{path}`
-  - MIME type detection for 18 file extensions (HTML, CSS, JS, images, fonts, etc.)
-  - 3 Canvas Tauri commands: list_programs, delete_program, get_program_url
-  - Updated `create_tools()` to accept `db` and `programs_root` params and include 6 canvas tools (16 tools total)
-  - Updated system prompt with Canvas Programs section
-  - All 115 tests pass, cargo clippy clean, cargo fmt applied
+- **open_program Tool + Auto-Reload COMPLETED**:
+  - Added `OpenProgramTool` to `src-tauri/src/canvas/tools.rs` (rig Tool that emits `canvas:open_program` event)
+  - Added `app_handle: Option<AppHandle>` to `CreateProgramTool`, `ProgramWriteFileTool`, `ProgramEditFileTool`
+  - `ProgramWriteFileTool` and `ProgramEditFileTool` now emit `canvas:program_updated` event after successful operations
+  - Updated `create_tools()` in `agent/mod.rs` to accept and pass `app_handle`
+  - Updated `OwnAIAgent::new()` to accept `app_handle: Option<AppHandle>`
+  - Updated `commands/chat.rs` (`send_message` + `stream_message`) to pass `AppHandle` to agent creation
+  - Updated system prompt Canvas section: agent instructed to call `list_programs` first, use `open_program` for existing programs
+  - Added `refreshActiveProgram(newVersion?)` action to `canvasStore.ts` (cache-busting iframe reload via `?v=timestamp`)
+  - Added event listener for `canvas:open_program` in `App.tsx` (selectProgram + setViewMode('split'))
+  - Added event listener for `canvas:program_updated` in `App.tsx` (iframe auto-reload + version update)
+  - All checks pass: `cargo build`, `cargo test` (115 passed), `cargo clippy`, `cargo fmt`, `pnpm tsc --noEmit`, `pnpm lint`, `pnpm format`
+
+- **Step 14 COMPLETED** (Canvas System - Frontend):
+  - Added `Program` and `CanvasViewMode` types to `src/types/index.ts`
+  - Created `src/stores/canvasStore.ts` (Zustand store with programs, activeProgram, programUrl, viewMode, loadPrograms, selectProgram, deleteProgram, clearCanvas)
+  - Created `src/components/canvas/ProgramList.tsx` (program selection list with inline delete confirmation, empty state message)
+  - Created `src/components/canvas/CanvasPanel.tsx` (toolbar with program name/version, fullscreen/minimize toggle, close button, sandboxed iframe, program list fallback)
+  - Modified `src/components/layout/Header.tsx` (added PanelRight icon for canvas toggle, visible when programs exist or canvas is open, accent-colored when active)
+  - Modified `src/App.tsx` for split-view layout:
+    - Three view modes: `chat` (full-width chat), `split` (50/50 chat + canvas), `canvas` (full-width canvas)
+    - Auto-detection of new programs after streaming completes (compares program count, auto-opens newest in split view)
+    - Programs loaded when active instance changes, canvas cleared when no instance
+  - Added i18n translations (EN + DE) for canvas section (12 keys each)
+  - Iframe uses `sandbox="allow-scripts allow-forms allow-modals allow-same-origin"` with `ownai-program://` protocol
+  - All frontend checks pass: `pnpm tsc --noEmit`, `pnpm lint`, `pnpm format`
 
 ## Next Steps
 
 ### Near-term (Phase 4 - Deep Agent Features)
-- Step 14: Canvas System - Frontend (iframe component, split-view, store)
 - Step 15: Bridge API (postMessage communication between Canvas and backend)
 - Step 16: Sub-Agent System (code-writer, researcher, memory-manager)
 - Step 17: Scheduled Tasks (tokio-cron-scheduler)
 - Step 18: Dynamic System Prompt (final integration with all capabilities)
 
 ### Later (Phase 5-7)
-- UI/UX refinement (message virtualization, Canvas split-view, ToolCallIndicator, TodoList rendering)
+- UI/UX refinement (message virtualization, onboarding, ToolCallIndicator, TodoList rendering)
 - Testing & stabilization
 - Build & packaging for release
 
@@ -94,6 +105,9 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 - **Tool Iteration**: Agent can read source code with read_tool, then fix/improve with update_tool (version auto-incremented)
 - **Canvas Programs**: Identified by name (not UUID), filesystem-like tools, agent does not know instance_id
 - **Canvas Protocol**: `ownai-program://localhost/{instance_id}/{program_name}/{path}` for serving files
+- **Canvas Frontend**: Split-view with three modes (chat/split/canvas), auto-detection of new programs via program count comparison after streaming
+- **Canvas Events**: `canvas:open_program` (backend -> frontend to open a program), `canvas:program_updated` (backend -> frontend for auto-reload)
+- **Agent instructs to reuse programs**: System prompt tells agent to check `list_programs` first and use `open_program` for existing programs
 
 ## Important Patterns and Preferences
 
@@ -106,3 +120,4 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 - Agent uses `process_stream!` macro for uniform streaming across providers
 - Rhai scripts receive parameters via `params_json` scope variable (parsed with `json_parse()`)
 - Canvas tools use `#[serde(skip)]` pattern for non-serializable fields (Pool, PathBuf)
+- Canvas store uses `useCanvasStore.getState()` for reading state outside React components (in checkForNewPrograms callback)

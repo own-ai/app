@@ -136,6 +136,9 @@ TEST_LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=sk-... cargo test --test memory_in
 app/
 ├── src/                          # React frontend
 │   ├── components/
+│   │   ├── canvas/               # Canvas (program rendering)
+│   │   │   ├── CanvasPanel.tsx   # Iframe + toolbar + program list
+│   │   │   └── ProgramList.tsx   # Program selection with delete
 │   │   ├── chat/                 # Chat UI components
 │   │   │   ├── Message.tsx       # Message display (role-based styling)
 │   │   │   ├── MessageContent.tsx # Markdown rendering, code blocks

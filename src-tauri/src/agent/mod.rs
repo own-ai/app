@@ -11,11 +11,12 @@ use rig::streaming::{StreamedAssistantContent, StreamingChat};
 use rig::tool::ToolDyn;
 use sqlx::{Pool, Row, Sqlite};
 use std::path::PathBuf;
+use tauri::AppHandle;
 
 use crate::ai_instances::{AIInstance, APIKeyStorage, LLMProvider};
 use crate::canvas::tools::{
-    CreateProgramTool, ListProgramsTool, ProgramEditFileTool, ProgramLsTool, ProgramReadFileTool,
-    ProgramWriteFileTool,
+    CreateProgramTool, ListProgramsTool, OpenProgramTool, ProgramEditFileTool, ProgramLsTool,
+    ProgramReadFileTool, ProgramWriteFileTool,
 };
 use crate::memory::{
     fact_extraction, working_memory::Message, ContextBuilder, FactExtractionResponse,
@@ -67,6 +68,7 @@ fn create_tools(
     available_dynamic_tools: Vec<(String, String)>,
     db: Pool<Sqlite>,
     programs_root: PathBuf,
+    app_handle: Option<AppHandle>,
 ) -> Vec<Box<dyn ToolDyn>> {
     let workspace =
         paths::get_instance_workspace_path(instance_id).unwrap_or_else(|_| PathBuf::from("."));
@@ -94,19 +96,27 @@ fn create_tools(
             db.clone(),
             instance_id.to_string(),
             programs_root.clone(),
+            app_handle.clone(),
         )),
         Box::new(ListProgramsTool::new(db.clone(), instance_id.to_string())),
+        Box::new(OpenProgramTool::new(
+            db.clone(),
+            instance_id.to_string(),
+            app_handle.clone(),
+        )),
         Box::new(ProgramLsTool::new(programs_root.clone())),
         Box::new(ProgramReadFileTool::new(programs_root.clone())),
         Box::new(ProgramWriteFileTool::new(
             db.clone(),
             instance_id.to_string(),
             programs_root.clone(),
+            app_handle.clone(),
         )),
         Box::new(ProgramEditFileTool::new(
             db,
             instance_id.to_string(),
             programs_root,
+            app_handle,
         )),
     ];
 
@@ -181,6 +191,7 @@ impl OwnAIAgent {
         instance: &AIInstance,
         db: Pool<Sqlite>,
         max_tokens: Option<usize>,
+        app_handle: Option<AppHandle>,
     ) -> Result<Self> {
         // Initialize Memory System components
         let mut working_memory = WorkingMemory::new(max_tokens.unwrap_or(50_000));
@@ -244,6 +255,7 @@ impl OwnAIAgent {
                     available_dynamic_tools.clone(),
                     db.clone(),
                     programs_root.clone(),
+                    app_handle.clone(),
                 );
 
                 let agent = client
@@ -283,6 +295,7 @@ impl OwnAIAgent {
                     available_dynamic_tools.clone(),
                     db.clone(),
                     programs_root.clone(),
+                    app_handle.clone(),
                 );
 
                 let agent = openai_client
@@ -331,6 +344,7 @@ impl OwnAIAgent {
                     available_dynamic_tools.clone(),
                     db.clone(),
                     programs_root.clone(),
+                    app_handle,
                 );
 
                 let agent = ollama_client
@@ -727,15 +741,23 @@ You can create interactive HTML/CSS/JS applications that the user can see and in
 ### Canvas Tools
 - **create_program**: Create a new program with an initial index.html
 - **list_programs**: List all programs you have created
+- **open_program**: Open an existing program in the Canvas panel for the user to see
 - **program_ls**: List files within a program directory
 - **program_read_file**: Read the contents of a file in a program
-- **program_write_file**: Write/create a file in a program (bumps version)
-- **program_edit_file**: Edit a file with search/replace (bumps version)
+- **program_write_file**: Write/create a file in a program (bumps version, auto-reloads in frontend)
+- **program_edit_file**: Edit a file with search/replace (bumps version, auto-reloads in frontend)
+
+### When to Use an Existing Program
+IMPORTANT: Before creating a new program, always call `list_programs` first to check if a suitable
+program already exists. If the user asks for something that matches an existing program (e.g. "Let's
+play chess" and a "chess-board" program exists), use `open_program` to display it instead of creating
+a new one. You can then use `program_edit_file` or `program_write_file` to modify it if needed.
 
 ### When to Create a Program
 - The user needs a visual interface (dashboard, form, game, chart)
 - A task benefits from interactive HTML rather than plain text
 - The user asks you to "show", "display", or "build" something visual
+- No suitable existing program was found via `list_programs`
 - Examples: chess board, expense tracker, data dashboard, quiz app
 
 ### How to Create a Program

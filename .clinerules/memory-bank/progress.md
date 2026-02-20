@@ -5,7 +5,7 @@
 **Phase 1 (Foundation)**: Complete
 **Phase 2 (Memory System)**: Complete
 **Phase 3 (Self-Programming / Rhai)**: Complete
-**Phase 4 (Deep Agent Features)**: Steps 12-13 complete (Canvas Backend + Protocol), next: Step 14 (Canvas Frontend)
+**Phase 4 (Deep Agent Features)**: Steps 12-14 complete (Canvas Backend + Protocol + Frontend), next: Step 15 (Bridge API)
 **Phase 5-7 (Polish, Testing, Release)**: Not started
 
 ## What Works
@@ -44,7 +44,7 @@
 - [x] Context Builder (assembles context from all memory tiers)
 - [x] Filesystem Tools (ls, read_file, write_file, edit_file, grep) with tests
 - [x] Planning Tool (write_todos with SharedTodoList) with tests
-- [x] Tools registered with agent via create_tools() helper (16 tools total)
+- [x] Tools registered with agent via create_tools() helper (17 tools total)
 - [x] process_stream! macro for uniform streaming across providers
 - [x] Path utilities for cross-platform file management
 - [x] Workspace directory per instance at `~/.ownai/instances/{id}/workspace/`
@@ -56,14 +56,16 @@
 - [x] Dynamic tool Tauri commands (list, create, update, delete, execute via AgentCache)
 - [x] Self-programming tools (CreateToolTool, ReadToolTool, UpdateToolTool)
 - [x] Comprehensive system prompt with self-programming instructions, Rhai reference, and Canvas section
-- [x] Canvas System backend (6 agent tools, DB table, filesystem storage)
+- [x] Canvas System backend (7 agent tools incl. open_program, DB table, filesystem storage)
 - [x] Canvas Custom Protocol (`ownai-program://` URI scheme for serving files)
 - [x] Canvas Tauri commands (list_programs, delete_program, get_program_url)
+- [x] Canvas Frontend (CanvasPanel with iframe, ProgramList, canvasStore, split-view layout, auto-detection)
+- [x] open_program tool (backend emits event, frontend opens program in split view)
+- [x] Auto-reload on program updates (ProgramWriteFile/EditFile emit event, frontend refreshes iframe)
 
 ## What's Left to Build
 
 ### Phase 4 - Deep Agent Features
-- [ ] **Canvas System - Frontend**: iframe component, split-view layout, program store
 - [ ] **Bridge API**: postMessage communication between Canvas apps and backend
   - [ ] chat(), storeData(), loadData(), notify(), readFile(), writeFile()
 - [ ] **Sub-Agent System**: TaskTool for delegating to specialized sub-agents

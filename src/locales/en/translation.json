@@ -65,6 +65,20 @@
     "api_key_empty": "Please enter an API key",
     "about": "About"
   },
+  "canvas": {
+    "programs": "Programs",
+    "no_programs": "No programs yet. Ask your AI to create one for you.",
+    "open_program": "Open",
+    "delete_program": "Delete program",
+    "confirm_delete": "Delete program \"{{name}}\"? This cannot be undone.",
+    "close_canvas": "Close program",
+    "fullscreen": "Fullscreen",
+    "exit_fullscreen": "Exit fullscreen",
+    "version": "v{{version}}",
+    "loading_program": "Loading program...",
+    "program_list": "Select a program",
+    "toggle_canvas": "Toggle program view"
+  },
   "errors": {
     "generic": "Something went wrong. Please try again.",
     "network": "Network error. Please check your connection.",

@@ -1,13 +1,14 @@
 //! Canvas program tools for the agent.
 //!
-//! Provides six rig Tools that allow the agent to create and manage
+//! Provides seven rig Tools that allow the agent to create and manage
 //! HTML/CSS/JS programs (Canvas apps):
 //! - `CreateProgramTool`: Create a new program with initial HTML
 //! - `ListProgramsTool`: List all programs for the current instance
+//! - `OpenProgramTool`: Open an existing program in the frontend
 //! - `ProgramLsTool`: List files within a program directory
 //! - `ProgramReadFileTool`: Read a file from a program
-//! - `ProgramWriteFileTool`: Write/create a file in a program
-//! - `ProgramEditFileTool`: Edit a file with search/replace
+//! - `ProgramWriteFileTool`: Write/create a file in a program (emits update event)
+//! - `ProgramEditFileTool`: Edit a file with search/replace (emits update event)
 
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
@@ -15,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{Pool, Sqlite};
 use std::path::PathBuf;
+use tauri::{AppHandle, Emitter};
 use tokio::fs;
 
 use super::resolve_program_path;
@@ -48,14 +50,23 @@ pub struct CreateProgramTool {
     instance_id: Option<String>,
     #[serde(skip)]
     programs_root: Option<PathBuf>,
+    #[serde(skip)]
+    #[allow(dead_code)]
+    app_handle: Option<AppHandle>,
 }
 
 impl CreateProgramTool {
-    pub fn new(db: Pool<Sqlite>, instance_id: String, programs_root: PathBuf) -> Self {
+    pub fn new(
+        db: Pool<Sqlite>,
+        instance_id: String,
+        programs_root: PathBuf,
+        app_handle: Option<AppHandle>,
+    ) -> Self {
         Self {
             db: Some(db),
             instance_id: Some(instance_id),
             programs_root: Some(programs_root),
+            app_handle,
         }
     }
 }
@@ -458,14 +469,22 @@ pub struct ProgramWriteFileTool {
     instance_id: Option<String>,
     #[serde(skip)]
     programs_root: Option<PathBuf>,
+    #[serde(skip)]
+    app_handle: Option<AppHandle>,
 }
 
 impl ProgramWriteFileTool {
-    pub fn new(db: Pool<Sqlite>, instance_id: String, programs_root: PathBuf) -> Self {
+    pub fn new(
+        db: Pool<Sqlite>,
+        instance_id: String,
+        programs_root: PathBuf,
+        app_handle: Option<AppHandle>,
+    ) -> Self {
         Self {
             db: Some(db),
             instance_id: Some(instance_id),
             programs_root: Some(programs_root),
+            app_handle,
         }
     }
 }
@@ -548,6 +567,14 @@ impl Tool for ProgramWriteFileTool {
             .await
             .map_err(|e| CanvasToolError(format!("Failed to update version: {}", e)))?;
 
+        // Notify frontend that the program was updated
+        if let Some(handle) = &self.app_handle {
+            let _ = handle.emit(
+                "canvas:program_updated",
+                json!({ "program_name": args.program_name, "version": new_version }),
+            );
+        }
+
         Ok(format!(
             "File written: {} ({} bytes) in program '{}' (now v{})",
             args.path,
@@ -579,14 +606,22 @@ pub struct ProgramEditFileTool {
     instance_id: Option<String>,
     #[serde(skip)]
     programs_root: Option<PathBuf>,
+    #[serde(skip)]
+    app_handle: Option<AppHandle>,
 }
 
 impl ProgramEditFileTool {
-    pub fn new(db: Pool<Sqlite>, instance_id: String, programs_root: PathBuf) -> Self {
+    pub fn new(
+        db: Pool<Sqlite>,
+        instance_id: String,
+        programs_root: PathBuf,
+        app_handle: Option<AppHandle>,
+    ) -> Self {
         Self {
             db: Some(db),
             instance_id: Some(instance_id),
             programs_root: Some(programs_root),
+            app_handle,
         }
     }
 }
@@ -674,9 +709,112 @@ impl Tool for ProgramEditFileTool {
             .await
             .map_err(|e| CanvasToolError(format!("Failed to update version: {}", e)))?;
 
+        // Notify frontend that the program was updated
+        if let Some(handle) = &self.app_handle {
+            let _ = handle.emit(
+                "canvas:program_updated",
+                json!({ "program_name": args.program_name, "version": new_version }),
+            );
+        }
+
         Ok(format!(
             "File edited: {} in program '{}' (now v{})",
             args.path, args.program_name, new_version
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OpenProgramTool
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct OpenProgramArgs {
+    program_name: String,
+}
+
+/// Agent tool to open/display an existing Canvas program in the frontend.
+/// Emits a `canvas:open_program` event so the frontend shows the program.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct OpenProgramTool {
+    #[serde(skip)]
+    db: Option<Pool<Sqlite>>,
+    #[serde(skip)]
+    instance_id: Option<String>,
+    #[serde(skip)]
+    app_handle: Option<AppHandle>,
+}
+
+impl OpenProgramTool {
+    pub fn new(db: Pool<Sqlite>, instance_id: String, app_handle: Option<AppHandle>) -> Self {
+        Self {
+            db: Some(db),
+            instance_id: Some(instance_id),
+            app_handle,
+        }
+    }
+}
+
+impl Tool for OpenProgramTool {
+    const NAME: &'static str = "open_program";
+    type Error = CanvasToolError;
+    type Args = OpenProgramArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "open_program".to_string(),
+            description: "Open an existing Canvas program in the user's view. \
+                Use this to display a program that was previously created, \
+                instead of creating a new one. The program will appear in \
+                the Canvas panel next to the chat."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "program_name": {
+                        "type": "string",
+                        "description": "Name of the program to open"
+                    }
+                },
+                "required": ["program_name"]
+            }),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let db = self
+            .db
+            .as_ref()
+            .ok_or_else(|| CanvasToolError("Database not initialized".to_string()))?;
+        let instance_id = self
+            .instance_id
+            .as_ref()
+            .ok_or_else(|| CanvasToolError("Instance ID not set".to_string()))?;
+
+        // Verify program exists
+        let program = storage::get_program_by_name(db, instance_id, &args.program_name)
+            .await
+            .map_err(|e| CanvasToolError(format!("Database error: {}", e)))?
+            .ok_or_else(|| {
+                CanvasToolError(format!(
+                    "Program '{}' not found. Use list_programs to see available programs, \
+                     or create_program to create a new one.",
+                    args.program_name
+                ))
+            })?;
+
+        // Emit event to open the program in the frontend
+        if let Some(handle) = &self.app_handle {
+            let _ = handle.emit(
+                "canvas:open_program",
+                json!({ "program_name": args.program_name }),
+            );
+        }
+
+        Ok(format!(
+            "Program '{}' (v{}) is now displayed in the Canvas panel.",
+            program.name, program.version
         ))
     }
 }
@@ -706,7 +844,7 @@ mod tests {
         let (db, temp_dir) = setup().await;
         let programs_root = temp_dir.path().to_path_buf();
 
-        let tool = CreateProgramTool::new(db, "inst-1".to_string(), programs_root.clone());
+        let tool = CreateProgramTool::new(db, "inst-1".to_string(), programs_root.clone(), None);
 
         let result = tool
             .call(CreateProgramArgs {
@@ -728,7 +866,12 @@ mod tests {
     #[tokio::test]
     async fn test_create_program_invalid_name() {
         let (db, temp_dir) = setup().await;
-        let tool = CreateProgramTool::new(db, "inst-1".to_string(), temp_dir.path().to_path_buf());
+        let tool = CreateProgramTool::new(
+            db,
+            "inst-1".to_string(),
+            temp_dir.path().to_path_buf(),
+            None,
+        );
 
         let result = tool
             .call(CreateProgramArgs {
@@ -845,6 +988,7 @@ mod tests {
             db.clone(),
             "inst-1".to_string(),
             programs_root.to_path_buf(),
+            None,
         );
 
         let result = tool
@@ -867,8 +1011,12 @@ mod tests {
     #[tokio::test]
     async fn test_program_write_file_nonexistent_program() {
         let (db, temp_dir) = setup().await;
-        let tool =
-            ProgramWriteFileTool::new(db, "inst-1".to_string(), temp_dir.path().to_path_buf());
+        let tool = ProgramWriteFileTool::new(
+            db,
+            "inst-1".to_string(),
+            temp_dir.path().to_path_buf(),
+            None,
+        );
 
         let result = tool
             .call(ProgramWriteFileArgs {
@@ -900,6 +1048,7 @@ mod tests {
             db.clone(),
             "inst-1".to_string(),
             programs_root.to_path_buf(),
+            None,
         );
 
         let result = tool
@@ -934,7 +1083,8 @@ mod tests {
         )
         .unwrap();
 
-        let tool = ProgramEditFileTool::new(db, "inst-1".to_string(), programs_root.to_path_buf());
+        let tool =
+            ProgramEditFileTool::new(db, "inst-1".to_string(), programs_root.to_path_buf(), None);
 
         let result = tool
             .call(ProgramEditFileArgs {

@@ -133,7 +133,7 @@ async fn test_summarization_pipeline_with_llm() {
     let db = setup_test_db().await;
 
     // Create agent with very small token budget to trigger quick eviction
-    let mut agent = OwnAIAgent::new(&instance, db.clone(), Some(300))
+    let mut agent = OwnAIAgent::new(&instance, db.clone(), Some(300), None)
         .await
         .expect("Failed to create agent");
 
@@ -235,7 +235,7 @@ async fn test_agent_creation() {
 
     let db = setup_test_db().await;
 
-    let agent = OwnAIAgent::new(&instance, db, None).await;
+    let agent = OwnAIAgent::new(&instance, db, None, None).await;
 
     assert!(
         agent.is_ok(),

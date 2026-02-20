@@ -39,3 +39,16 @@ export interface CreateInstanceRequest {
   model: string;
   api_base_url?: string;
 }
+
+// Canvas/Program Types
+export interface Program {
+  id: string;
+  instance_id: string;
+  name: string;
+  description: string;
+  version: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type CanvasViewMode = "chat" | "split" | "canvas";

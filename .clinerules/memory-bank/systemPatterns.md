@@ -73,9 +73,10 @@ ownAI is a Tauri 2.0 desktop application with a React frontend and a Rust backen
 ### Frontend Patterns
 
 #### State Management (Zustand)
-Two stores:
+Three stores:
 - **chatStore**: messages array, isTyping flag, streaming message ID, addMessage/updateMessage/setTyping actions
 - **instanceStore**: instances list, activeInstanceId, settings state, CRUD actions
+- **canvasStore**: programs list, activeProgram, programUrl, viewMode (chat/split/canvas), loadPrograms/selectProgram/deleteProgram/clearCanvas actions
 
 #### Component Architecture
 - **Layout**: Header + scrollable content area + fixed input area
@@ -101,12 +102,12 @@ Two stores:
 ```
 OwnAIAgent
 ├── model (rig-core Agent - Anthropic, OpenAI, or Ollama)
-├── tools (16 total):
+├── tools (17 total):
 │   ├── Filesystem: ls, read_file, write_file, edit_file, grep
 │   ├── Planning: write_todos
 │   ├── Dynamic: execute_dynamic_tool (Rhai bridge)
 │   ├── Self-Programming: create_tool, read_tool, update_tool
-│   └── Canvas: create_program, list_programs, program_ls, program_read_file, program_write_file, program_edit_file
+│   └── Canvas: create_program, list_programs, open_program, program_ls, program_read_file, program_write_file, program_edit_file
 ├── working_memory (VecDeque<Message>)
 ├── summarization (SummarizationAgent)
 ├── long_term_memory (LongTermMemory with fastembed)
@@ -269,7 +270,8 @@ The agent can create, read, update, and execute dynamic Rhai tools:
 
 The agent can create and manage interactive HTML/CSS/JS applications:
 - **Canvas Module** (`canvas/`): 4-file structure - mod.rs (path resolution + security), storage.rs (DB CRUD), protocol.rs (URL parsing + file serving), tools.rs (6 rig Tools)
-- **6 Canvas Tools**: create_program, list_programs, program_ls, program_read_file, program_write_file, program_edit_file
+- **7 Canvas Tools**: create_program, list_programs, open_program, program_ls, program_read_file, program_write_file, program_edit_file
+- **Canvas Events**: `canvas:open_program` (backend emits to open a program in frontend), `canvas:program_updated` (backend emits after write/edit to trigger auto-reload)
 - **Custom Protocol**: `ownai-program://localhost/{instance_id}/{program_name}/{path}` for serving files
 - **Program Identity**: By name (not UUID), chosen by the agent; agent does NOT know its instance_id
 - **Filesystem-like Tools**: Write and edit files within program directories (not monolithic save/update)
@@ -278,12 +280,17 @@ The agent can create and manage interactive HTML/CSS/JS applications:
 - **Storage**: Programs table in SQLite + files at `~/.ownai/instances/{id}/programs/{program_name}/`
 - **3 Tauri Commands**: list_programs, delete_program, get_program_url
 
-## Planned Architecture (Not Yet Implemented)
+## Implemented: Canvas Frontend
 
-### Canvas Frontend
-- Sandboxed iframe rendering Canvas programs
-- Split-view layout: Chat + Canvas side by side
-- Canvas view toggle (split-view / fullscreen)
+- **CanvasPanel** (`components/canvas/CanvasPanel.tsx`): Toolbar (program name, version, fullscreen toggle, close button) + sandboxed iframe with `sandbox="allow-scripts allow-forms allow-modals allow-same-origin"`
+- **ProgramList** (`components/canvas/ProgramList.tsx`): Program selection list with inline delete confirmation, empty state
+- **canvasStore** (`stores/canvasStore.ts`): programs, activeProgram, programUrl, viewMode (chat/split/canvas), loadPrograms/selectProgram/deleteProgram/clearCanvas
+- **Split-View Layout** (in `App.tsx`): Three modes - chat (full-width), split (50/50 chat + canvas), canvas (full-width canvas)
+- **Auto-Detection**: After streaming completes, compares program count; if new program detected, auto-opens split view with newest program
+- **Header Toggle**: PanelRight icon visible when programs exist or canvas is open, accent-colored when active
+- **Program URL**: Iframe loads `ownai-program://localhost/{instanceId}/{programName}/index.html`
+
+## Planned Architecture (Not Yet Implemented)
 
 ### Bridge API (for Canvas Programs)
 - postMessage communication between Canvas iframe and backend
