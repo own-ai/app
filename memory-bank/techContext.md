@@ -156,6 +156,6 @@ app/
 │   ├── Cargo.toml
 │   └── tauri.conf.json
 │
-├── .clinerules/                  # Memory bank + rules
+├── memory-bank/                  # Memory bank
 └── public/                       # Static assets
 ```

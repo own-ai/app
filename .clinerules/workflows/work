@@ -8,12 +8,12 @@ This workflow defines the iterative development process for ownAI. Follow these 
 
 **Before starting any work**, read ALL of the following files to understand the current state:
 
-- `.clinerules/memory-bank/projectbrief.md` - Project vision and requirements
-- `.clinerules/memory-bank/productContext.md` - Why the project exists, problems it solves
-- `.clinerules/memory-bank/systemPatterns.md` - Architecture and design patterns
-- `.clinerules/memory-bank/techContext.md` - Technology stack and setup
-- `.clinerules/memory-bank/activeContext.md` - Current work focus and recent changes
-- `.clinerules/memory-bank/progress.md` - What works and what's left to build
+- `memory-bank/projectbrief.md` - Project vision and requirements
+- `memory-bank/productContext.md` - Why the project exists, problems it solves
+- `memory-bank/systemPatterns.md` - Architecture and design patterns
+- `memory-bank/techContext.md` - Technology stack and setup
+- `memory-bank/activeContext.md` - Current work focus and recent changes
+- `memory-bank/progress.md` - What works and what's left to build
 - `implementation_plan.md` - Detailed implementation plan with phases and steps
 
 **This is mandatory** - the Memory Bank is your only link to previous work.
@@ -135,13 +135,13 @@ Once the build and tests succeed, update the following files:
 - Update the overview if a phase is now complete
 - Add any learnings or deviations from the original plan
 
-#### Update `.clinerules/memory-bank/activeContext.md`:
+#### Update `memory-bank/activeContext.md`:
 - Add the completed work to "Recent Changes"
 - Update "Current Work Focus" to reflect new state
 - Update "Next Steps" based on remaining work
 - Add any important decisions or patterns discovered
 
-#### Update `.clinerules/memory-bank/progress.md`:
+#### Update `memory-bank/progress.md`:
 - Move completed items from "What's Left to Build" to "What Works"
 - Update phase completion status
 - Add any new known issues discovered
