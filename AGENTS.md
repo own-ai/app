@@ -795,11 +795,31 @@ Generated tools run in a Rhai sandbox with:
 - Max memory limits
 - Network access only to approved domains
 
+## Memory Bank
+
+The `memory-bank/` directory contains persistent context files that AI agents should read at the start of every session. These files provide essential project knowledge and continuity across sessions.
+
+### Core Files
+
+| File | Purpose |
+|------|---------|
+| [`memory-bank/projectbrief.md`](memory-bank/projectbrief.md) | Foundation document defining core requirements, goals, and project scope |
+| [`memory-bank/productContext.md`](memory-bank/productContext.md) | Why this project exists, problems it solves, user experience goals |
+| [`memory-bank/activeContext.md`](memory-bank/activeContext.md) | Current work focus, recent changes, next steps, active decisions |
+| [`memory-bank/systemPatterns.md`](memory-bank/systemPatterns.md) | System architecture, key technical decisions, design patterns, component relationships |
+| [`memory-bank/techContext.md`](memory-bank/techContext.md) | Technologies used, development setup, technical constraints, dependencies |
+| [`memory-bank/progress.md`](memory-bank/progress.md) | What works, what's left to build, current status, known issues |
+| [`memory-bank/designPhilosophy.md`](memory-bank/designPhilosophy.md) | Complete UI/UX design philosophy: typography, colors, layout, components, animations, accessibility |
+
+### Usage
+
+AI agents **must** read all memory bank files at the start of every task. The design philosophy file is especially important when working on frontend components, styling, or any UI-related changes.
+
 ## Contributing Notes
 
 When contributing, please:
 
-1. Follow the design philosophy for UI/UX guidelines
+1. Follow the [design philosophy](memory-bank/designPhilosophy.md) for UI/UX guidelines
 2. Follow the code style conventions outlined here
 3. Add tests for new functionality
 4. Update this file if adding new patterns or architectural changes
