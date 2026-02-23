@@ -5,7 +5,7 @@
 **Phase 1 (Foundation)**: Complete
 **Phase 2 (Memory System)**: Complete
 **Phase 3 (Self-Programming / Rhai)**: Complete
-**Phase 4 (Deep Agent Features)**: Steps 12-15 complete (Canvas Backend + Protocol + Frontend + Bridge API), next: Step 16 (Sub-Agent System)
+**Phase 4 (Deep Agent Features)**: Steps 12-16 complete (Canvas Backend + Protocol + Frontend + Bridge API + Sub-Agent System), next: Step 17 (Scheduled Tasks)
 **Phase 5-7 (Polish, Testing, Release)**: Not started
 
 ## What Works
@@ -44,7 +44,7 @@
 - [x] Context Builder (assembles context from all memory tiers)
 - [x] Filesystem Tools (ls, read_file, write_file, edit_file, grep) with tests
 - [x] Planning Tool (write_todos with SharedTodoList) with tests
-- [x] Tools registered with agent via create_tools() helper (17 tools total)
+- [x] Tools registered with agent via create_tools() helper (21 tools total for main agent, 20 for sub-agents)
 - [x] process_stream! macro for uniform streaming across providers
 - [x] Path utilities for cross-platform file management
 - [x] Workspace directory per instance at `~/.ownai/instances/{id}/workspace/`
@@ -66,14 +66,19 @@
 - [x] Bridge script injection into HTML files served via ownai-program:// protocol
 - [x] Per-program key-value storage (program_data table)
 - [x] Bridge API system prompt documentation
+- [x] Sub-Agent System (dynamic sub-agents via DelegateTaskTool, ClientProvider, base_tools_prompt)
+- [x] Memory Tools (search_memory, add_memory, delete_memory as rig Tools for all agents)
+- [x] SharedLongTermMemory (Arc<Mutex<LongTermMemory>>) for concurrent tool access
+- [x] System prompt refactored to use base_tools_prompt() (no duplication)
 
 ## What's Left to Build
 
 ### Phase 4 - Deep Agent Features
-- [ ] **Sub-Agent System**: TaskTool for delegating to specialized sub-agents
-  - [ ] code-writer sub-agent
-  - [ ] researcher sub-agent
-  - [ ] memory-manager sub-agent
+- [x] **Sub-Agent System**: DelegateTaskTool for dynamic sub-agent creation
+  - [x] Dynamic sub-agents (main agent creates on the fly with custom system prompts)
+  - [x] All tools available to sub-agents (except delegate_task to prevent recursion)
+  - [x] Memory tools (search_memory, add_memory, delete_memory) for all agents
+  - [x] base_tools_prompt() for tool documentation
 - [ ] **Scheduled Tasks**: Cron-like system
   - [ ] tokio-cron-scheduler integration
   - [ ] Task creation/management via chat
@@ -131,3 +136,5 @@
 12. **Canvas Program Identity**: Programs identified by name (not UUID), chosen by the agent, similar to dynamic Rhai tools
 13. **Canvas Tool Design**: Filesystem-like tools (program_write_file, program_edit_file) instead of monolithic save/update, agent does not know instance_id
 14. **Bridge API File Scope**: readFile/writeFile in Bridge API scoped to workspace directory (not program directory), giving Canvas programs access to shared workspace data
+15. **Sub-Agent Architecture**: Evolved from predefined sub-agents to fully dynamic -- main agent creates sub-agents on the fly via delegate_task with custom system prompts. Sub-agents get ALL tools except delegate_task (prevents recursion). Tool documentation centralized in base_tools_prompt().
+16. **SharedLongTermMemory**: Refactored LongTermMemory to Arc<Mutex<>> for concurrent access by memory tools, context builder, and fact extraction.

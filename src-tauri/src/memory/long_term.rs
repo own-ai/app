@@ -4,6 +4,11 @@ use chrono::{DateTime, Utc};
 use fastembed::Qwen3TextEmbedding;
 use serde::{Deserialize, Serialize};
 use sqlx::{Pool, Row, Sqlite};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+/// A shared reference to long-term memory, safe for concurrent access from tools.
+pub type SharedLongTermMemory = Arc<Mutex<LongTermMemory>>;
 
 /// Types of memories
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

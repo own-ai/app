@@ -1,11 +1,11 @@
 use anyhow::Result;
 
-use super::{LongTermMemory, SessionSummary, SummarizationAgent, WorkingMemory};
+use super::{SessionSummary, SharedLongTermMemory, SummarizationAgent, WorkingMemory};
 
 /// Context builder combines all memory layers into a coherent context
 pub struct ContextBuilder {
     working_memory: WorkingMemory,
-    long_term_memory: LongTermMemory,
+    long_term_memory: SharedLongTermMemory,
     summarization_agent: SummarizationAgent,
 }
 
@@ -13,7 +13,7 @@ impl ContextBuilder {
     /// Create new context builder
     pub fn new(
         working_memory: WorkingMemory,
-        long_term_memory: LongTermMemory,
+        long_term_memory: SharedLongTermMemory,
         summarization_agent: SummarizationAgent,
     ) -> Self {
         Self {
@@ -24,11 +24,14 @@ impl ContextBuilder {
     }
 
     /// Build complete context for a user query
-    pub async fn build_context(&mut self, user_query: &str) -> Result<String> {
+    pub async fn build_context(&self, user_query: &str) -> Result<String> {
         let mut context_parts = Vec::new();
 
         // 1. Long-term memories (semantically relevant)
-        let memories = self.long_term_memory.recall(user_query, 5, 0.5).await?;
+        let memories = {
+            let mut ltm = self.long_term_memory.lock().await;
+            ltm.recall(user_query, 10, 0.5).await?
+        };
 
         if !memories.is_empty() {
             context_parts.push("## Relevant Context:\n".to_string());
@@ -75,14 +78,9 @@ impl ContextBuilder {
         &mut self.working_memory
     }
 
-    /// Get long-term memory reference
-    pub fn long_term_memory(&self) -> &LongTermMemory {
+    /// Get shared long-term memory reference (for tools and commands)
+    pub fn long_term_memory(&self) -> &SharedLongTermMemory {
         &self.long_term_memory
-    }
-
-    /// Get mutable long-term memory reference
-    pub fn long_term_memory_mut(&mut self) -> &mut LongTermMemory {
-        &mut self.long_term_memory
     }
 
     /// Get summarization agent reference

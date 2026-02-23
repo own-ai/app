@@ -102,15 +102,17 @@ Three stores:
 ```
 OwnAIAgent
 ├── model (rig-core Agent - Anthropic, OpenAI, or Ollama)
-├── tools (17 total):
+├── tools (21 total for main agent, 20 for sub-agents):
 │   ├── Filesystem: ls, read_file, write_file, edit_file, grep
 │   ├── Planning: write_todos
 │   ├── Dynamic: execute_dynamic_tool (Rhai bridge)
 │   ├── Self-Programming: create_tool, read_tool, update_tool
-│   └── Canvas: create_program, list_programs, open_program, program_ls, program_read_file, program_write_file, program_edit_file
+│   ├── Canvas: create_program, list_programs, open_program, program_ls, program_read_file, program_write_file, program_edit_file
+│   ├── Memory: search_memory, add_memory, delete_memory
+│   └── Delegation: delegate_task (main agent only, excluded from sub-agents)
 ├── working_memory (VecDeque<Message>)
 ├── summarization (SummarizationAgent)
-├── long_term_memory (LongTermMemory with fastembed)
+├── long_term_memory (SharedLongTermMemory = Arc<Mutex<LongTermMemory>>)
 ├── context_builder (ContextBuilder)
 ├── tool_registry (SharedRegistry = Arc<RwLock<RhaiToolRegistry>>)
 └── db (SqlitePool)
@@ -127,8 +129,22 @@ OwnAIAgent
 - Lazy initialization: agent created on first use per instance
 - Avoids re-creating agents on every request
 
+#### Sub-Agent Pattern
+- Main agent creates sub-agents dynamically via `DelegateTaskTool`
+- Sub-agents get ALL tools except `delegate_task` (prevents recursion)
+- `base_tools_prompt()` in `subagents.rs` for tool documentation
+- Main agent's `system_prompt()` calls `base_tools_prompt()` -- no duplication
+- `ClientProvider` enum wraps Anthropic/OpenAI/Ollama clients for sub-agent creation
+- Sub-agents have max 25 tool turns, temporary context (no memory persistence)
+
+#### SharedLongTermMemory Pattern
+- `SharedLongTermMemory = Arc<Mutex<LongTermMemory>>` type alias
+- Created once in `OwnAIAgent::new()`, shared with tools and context builder
+- Memory tools (search/add/delete) lock the mutex for each operation
+- `commands/memory.rs` clones the Arc, drops AgentCache lock, then locks memory
+
 #### Command Pattern (Tauri)
-- 27 registered commands grouped by domain:
+- 28 registered commands grouped by domain:
   - **Instances**: create, list, delete, set_active, get_active
   - **Providers**: get_providers
   - **API Keys**: save_api_key, has_api_key, delete_api_key
@@ -295,8 +311,15 @@ The agent can create and manage interactive HTML/CSS/JS applications:
 ### Bridge API (for Canvas Programs)
 - postMessage communication between Canvas iframe and backend
 
+### Implemented: Sub-Agent System
+- **DelegateTaskTool**: Main agent creates temporary sub-agents on the fly with custom system prompts
+- **Dynamic Architecture**: No predefined sub-agents -- main agent decides role and prompt per task
+- **Tool Access**: Sub-agents get all 20 tools (everything except delegate_task to prevent recursion)
+- **Memory Tools**: search_memory, add_memory, delete_memory available to all agents
+- **ClientProvider**: Enum wrapping Anthropic/OpenAI/Ollama clients, passed to DelegateTaskTool
+- **base_tools_prompt()**: Prompt for tool documentation, used by main + sub-agents
+
 ### Deep Agent System (Remaining)
-- **Sub-Agents**: Specialized agents (code-writer, researcher, memory-manager)
 - **Scheduled Tasks**: tokio-cron-scheduler for recurring actions
 
 ### Bridge API (for Canvas Programs)

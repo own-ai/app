@@ -75,16 +75,18 @@ pub async fn search_memory(
     limit: usize,
     agent_cache: State<'_, AgentCache>,
 ) -> Result<Vec<MemorySearchResult>, String> {
-    let mut cache = agent_cache.lock().await;
+    let cache = agent_cache.lock().await;
 
     // Agent must be in cache (which contains the embedder in long-term memory)
     let agent = cache
-        .get_mut(&instance_id)
+        .get(&instance_id)
         .ok_or_else(|| "Agent not in cache - please send a message first".to_string())?;
 
-    // Perform semantic search
-    let long_term_memory = agent.context_builder_mut().long_term_memory_mut();
-    let memories = long_term_memory
+    // Perform semantic search via shared long-term memory
+    let long_term_memory = agent.context_builder().long_term_memory().clone();
+    drop(cache); // Release cache lock before awaiting the memory lock
+    let mut mem = long_term_memory.lock().await;
+    let memories = mem
         .recall(&query, limit, 0.0) // min_importance = 0.0 to include all
         .await
         .map_err(|e| format!("Failed to search memory: {}", e))?;
@@ -114,11 +116,11 @@ pub async fn add_memory_entry(
     importance: f32,
     agent_cache: State<'_, AgentCache>,
 ) -> Result<String, String> {
-    let mut cache = agent_cache.lock().await;
+    let cache = agent_cache.lock().await;
 
     // Agent must be in cache
     let agent = cache
-        .get_mut(&instance_id)
+        .get(&instance_id)
         .ok_or_else(|| "Agent not in cache - please send a message first".to_string())?;
 
     // Parse entry type
@@ -139,10 +141,11 @@ pub async fn add_memory_entry(
 
     let entry_id = entry.id.clone();
 
-    // Store in long-term memory
-    let long_term_memory = agent.context_builder_mut().long_term_memory_mut();
-    long_term_memory
-        .store(entry)
+    // Store in long-term memory via shared reference
+    let long_term_memory = agent.context_builder().long_term_memory().clone();
+    drop(cache); // Release cache lock before awaiting the memory lock
+    let mut mem = long_term_memory.lock().await;
+    mem.store(entry)
         .await
         .map_err(|e| format!("Failed to store memory entry: {}", e))?;
 
@@ -158,17 +161,18 @@ pub async fn delete_memory_entry(
     entry_id: String,
     agent_cache: State<'_, AgentCache>,
 ) -> Result<(), String> {
-    let mut cache = agent_cache.lock().await;
+    let cache = agent_cache.lock().await;
 
     // Agent must be in cache
     let agent = cache
-        .get_mut(&instance_id)
+        .get(&instance_id)
         .ok_or_else(|| "Agent not in cache - please send a message first".to_string())?;
 
-    // Delete from long-term memory
-    let long_term_memory = agent.context_builder_mut().long_term_memory_mut();
-    long_term_memory
-        .delete(&entry_id)
+    // Delete from long-term memory via shared reference
+    let long_term_memory = agent.context_builder().long_term_memory().clone();
+    drop(cache); // Release cache lock before awaiting the memory lock
+    let mem = long_term_memory.lock().await;
+    mem.delete(&entry_id)
         .await
         .map_err(|e| format!("Failed to delete memory entry: {}", e))?;
 

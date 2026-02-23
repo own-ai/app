@@ -20,13 +20,16 @@ use crate::canvas::tools::{
 };
 use crate::memory::{
     fact_extraction, working_memory::Message, ContextBuilder, FactExtractionResponse,
-    LongTermMemory, SessionSummary, SummarizationAgent, SummaryResponse, WorkingMemory,
+    LongTermMemory, SessionSummary, SharedLongTermMemory, SummarizationAgent, SummaryResponse,
+    WorkingMemory,
 };
 use crate::tools::code_generation::{CreateToolTool, ReadToolTool, UpdateToolTool};
 use crate::tools::filesystem::{EditFileTool, GrepTool, LsTool, ReadFileTool, WriteFileTool};
+use crate::tools::memory_tools::{AddMemoryTool, DeleteMemoryTool, SearchMemoryTool};
 use crate::tools::planning::{self, SharedTodoList, WriteTodosTool};
 use crate::tools::registry::RhaiToolRegistry;
 use crate::tools::rhai_bridge_tool::{RhaiExecuteTool, SharedRegistry};
+use crate::tools::subagents::{base_tools_prompt, ClientProvider, DelegateTaskTool};
 use crate::utils::paths;
 
 /// Macro to process streaming responses uniformly across providers.
@@ -60,7 +63,10 @@ macro_rules! process_stream {
     };
 }
 
-/// Helper: Create the set of tools for an instance
+/// Helper: Create the set of tools for an instance.
+/// Includes all tools: filesystem, planning, dynamic tools, self-programming,
+/// canvas, memory, and task delegation (sub-agents).
+#[allow(clippy::too_many_arguments)]
 fn create_tools(
     instance_id: &str,
     todo_list: SharedTodoList,
@@ -68,6 +74,9 @@ fn create_tools(
     available_dynamic_tools: Vec<(String, String)>,
     db: Pool<Sqlite>,
     programs_root: PathBuf,
+    long_term_memory: SharedLongTermMemory,
+    client_provider: ClientProvider,
+    model: String,
     app_handle: Option<AppHandle>,
 ) -> Vec<Box<dyn ToolDyn>> {
     let workspace =
@@ -90,7 +99,7 @@ fn create_tools(
         // Self-programming: create, read, and update dynamic tools
         Box::new(CreateToolTool::new(registry.clone(), workspace.clone())),
         Box::new(ReadToolTool::new(registry.clone())),
-        Box::new(UpdateToolTool::new(registry, workspace)),
+        Box::new(UpdateToolTool::new(registry.clone(), workspace)),
         // Canvas program tools
         Box::new(CreateProgramTool::new(
             db.clone(),
@@ -113,9 +122,24 @@ fn create_tools(
             app_handle.clone(),
         )),
         Box::new(ProgramEditFileTool::new(
-            db,
+            db.clone(),
             instance_id.to_string(),
+            programs_root.clone(),
+            app_handle.clone(),
+        )),
+        // Memory tools (long-term vector store)
+        Box::new(SearchMemoryTool::new(long_term_memory.clone())),
+        Box::new(AddMemoryTool::new(long_term_memory.clone())),
+        Box::new(DeleteMemoryTool::new(long_term_memory.clone())),
+        // Task delegation (sub-agents)
+        Box::new(DelegateTaskTool::new(
+            client_provider,
+            model,
+            instance_id.to_string(),
+            registry,
+            db,
             programs_root,
+            long_term_memory,
             app_handle,
         )),
     ];
@@ -196,6 +220,8 @@ impl OwnAIAgent {
         // Initialize Memory System components
         let mut working_memory = WorkingMemory::new(max_tokens.unwrap_or(50_000));
         let long_term_memory = LongTermMemory::new(db.clone()).await?;
+        let shared_long_term_memory: SharedLongTermMemory =
+            std::sync::Arc::new(tokio::sync::Mutex::new(long_term_memory));
         let summarization_agent = SummarizationAgent::new(db.clone());
 
         // Initialize table if needed
@@ -207,8 +233,11 @@ impl OwnAIAgent {
             working_memory.load_from_messages(recent_messages);
         }
 
-        let context_builder =
-            ContextBuilder::new(working_memory, long_term_memory, summarization_agent);
+        let context_builder = ContextBuilder::new(
+            working_memory,
+            shared_long_term_memory.clone(),
+            summarization_agent,
+        );
 
         // Create shared TODO list state
         let todo_list = planning::create_shared_todo_list();
@@ -247,6 +276,7 @@ impl OwnAIAgent {
         let (agent, summary_extractor, fact_extractor) = match instance.provider {
             LLMProvider::Anthropic => {
                 let client = anthropic::Client::builder().api_key(&api_key).build()?;
+                let client_provider = ClientProvider::Anthropic(client.clone());
 
                 let tools = create_tools(
                     &instance.id,
@@ -255,6 +285,9 @@ impl OwnAIAgent {
                     available_dynamic_tools.clone(),
                     db.clone(),
                     programs_root.clone(),
+                    shared_long_term_memory.clone(),
+                    client_provider,
+                    instance.model.clone(),
                     app_handle.clone(),
                 );
 
@@ -287,6 +320,7 @@ impl OwnAIAgent {
 
             LLMProvider::OpenAI => {
                 let openai_client = openai::Client::builder().api_key(&api_key).build()?;
+                let client_provider = ClientProvider::OpenAI(openai_client.clone());
 
                 let tools = create_tools(
                     &instance.id,
@@ -295,6 +329,9 @@ impl OwnAIAgent {
                     available_dynamic_tools.clone(),
                     db.clone(),
                     programs_root.clone(),
+                    shared_long_term_memory.clone(),
+                    client_provider,
+                    instance.model.clone(),
                     app_handle.clone(),
                 );
 
@@ -336,6 +373,7 @@ impl OwnAIAgent {
                 } else {
                     ollama::Client::new(Nothing)?
                 };
+                let client_provider = ClientProvider::Ollama(ollama_client.clone());
 
                 let tools = create_tools(
                     &instance.id,
@@ -344,6 +382,9 @@ impl OwnAIAgent {
                     available_dynamic_tools.clone(),
                     db.clone(),
                     programs_root.clone(),
+                    shared_long_term_memory.clone(),
+                    client_provider,
+                    instance.model.clone(),
                     app_handle,
                 );
 
@@ -629,7 +670,8 @@ impl OwnAIAgent {
         Ok(full_response)
     }
 
-    /// System prompt for ownAI -- includes tool usage and self-programming instructions
+    /// System prompt for ownAI -- includes identity, delegation instructions,
+    /// and shared tool documentation from `base_tools_prompt()`.
     fn system_prompt(instance_name: &str) -> String {
         format!(
             r#"You are {name}, a personal AI agent that evolves with your user.
@@ -642,165 +684,24 @@ You maintain a permanent, growing relationship with your user by:
 - Proactively improving yourself by creating new capabilities
 - Being helpful, concise, and honest
 
-## Available Tools
+{tools}
 
-### Filesystem (Workspace)
-- **ls**: List files and directories in your workspace
-- **read_file**: Read file contents (supports line ranges)
-- **write_file**: Write content to a file (creates dirs if needed)
-- **edit_file**: Replace text in a file (old_text -> new_text)
-- **grep**: Search for text patterns in files
+## Task Delegation
 
-IMPORTANT: You can ONLY access files within your workspace directory. If the user asks you to read, write, or access files at absolute paths or outside the workspace, you MUST decline and explain that for security reasons you can only access files within the workspace. Tell the user they can click the "Open Workspace" button (📂) in the header to open the workspace folder in their file manager, and then copy or move the needed files into the workspace.
+You can delegate complex tasks to temporary sub-agents using the **delegate_task** tool.
+Sub-agents work independently with their own context window and have access to all tools.
 
-Use the workspace to:
-- Save research results, notes, or data
-- Create and manage files for the user
-- Offload large information from context
+### When to Delegate
+- A task requires many tool calls that would clutter the conversation
+- A task is self-contained and can be described clearly
+- You want to run a complex multi-step operation (e.g. research, code generation, file organization)
 
-### Planning
-- **write_todos**: Create/update a TODO list for multi-step tasks
+### How to Delegate
+1. Call `delegate_task` with a short task name, a system prompt describing the sub-agent's role, and the task description
+2. The sub-agent will execute the task and return a summary of what was done
+3. You can then review the results and report back to the user
 
-Use write_todos when:
-- A task requires more than 2-3 steps
-- You need to track progress on complex work
-- You discover new requirements mid-task
-
-### Dynamic Tool Execution
-- **execute_dynamic_tool**: Run a previously created dynamic tool by name
-
-### Self-Programming (Tool Management)
-- **create_tool**: Create a new dynamic tool from Rhai script code
-- **read_tool**: Read the source code and metadata of an existing tool
-- **update_tool**: Update/fix an existing tool's Rhai script code
-
-## Self-Programming
-
-You can extend your own capabilities by creating dynamic tools written in Rhai (a lightweight scripting language). This is one of your most powerful features.
-
-### When to Create a Tool
-- A task requires calling external APIs (HTTP requests)
-- Data processing that your built-in tools do not cover
-- Recurring tasks that benefit from automation
-- The user explicitly asks you to create a new capability
-- You need to combine multiple operations into a single reusable step
-
-### How to Create a Tool
-1. Analyze what the tool needs to do
-2. Write a Rhai script (see language reference below)
-3. Call `create_tool` with a name, description, the script, and parameter definitions
-4. Test the tool with `execute_dynamic_tool`
-5. If it does not work correctly, use `read_tool` to inspect the code, then `update_tool` to fix it
-
-### Iterating on Tools
-If a dynamic tool produces unexpected results or errors:
-1. Call `read_tool` to see the current source code and usage stats
-2. Identify the issue in the Rhai script
-3. Call `update_tool` with the corrected code
-4. Re-test with `execute_dynamic_tool`
-
-You can also improve existing tools by adding error handling, extending functionality, or optimizing performance.
-
-### Rhai Language Reference
-
-Scripts receive parameters through the `params_json` scope variable:
-```
-let params = json_parse(params_json);
-let value = params["key"];
-```
-
-Available built-in functions:
-- **http_get(url)**: HTTPS GET request, returns response body
-- **http_post(url, body)**: HTTPS POST with JSON body
-- **http_request(method, url, headers, body)**: Flexible HTTP with custom method/headers
-- **read_file(path)**: Read file from workspace
-- **write_file(path, content)**: Write file to workspace
-- **json_parse(text)**: Parse JSON string to object/array
-- **json_stringify(value)**: Convert value to JSON string
-- **regex_match(text, pattern)**: Find all regex matches
-- **regex_replace(text, pattern, replacement)**: Replace regex matches
-- **base64_encode(text)**: Encode string to Base64
-- **base64_decode(text)**: Decode Base64 to string
-- **url_encode(text)**: URL-encode a string
-- **get_current_datetime()**: Get current UTC datetime (ISO 8601)
-- **send_notification(title, body)**: Queue a system notification
-
-Security constraints:
-- All HTTP requests must use HTTPS
-- File operations are restricted to the workspace directory
-- Scripts are terminated after 100,000 operations (prevents infinite loops)
-
-### Example: Creating a Simple Tool
-To create a tool that fetches a URL and extracts the title:
-1. Call create_tool with name="fetch_title", description="Fetches a URL and returns the page title"
-2. Script: `let params = json_parse(params_json); let body = http_get(params["url"]); let matches = regex_match(body, "<title>(.*?)</title>"); if matches.len() > 0 {{ matches[0] }} else {{ "No title found" }}`
-3. Parameters: [{{"name": "url", "type_hint": "string", "description": "URL to fetch", "required": true}}]
-
-## Canvas Programs (Visual Apps)
-
-You can create interactive HTML/CSS/JS applications that the user can see and interact with in an embedded view. These are called "Programs."
-
-### Canvas Tools
-- **create_program**: Create a new program with an initial index.html
-- **list_programs**: List all programs you have created
-- **open_program**: Open an existing program in the Canvas panel for the user to see
-- **program_ls**: List files within a program directory
-- **program_read_file**: Read the contents of a file in a program
-- **program_write_file**: Write/create a file in a program (bumps version, auto-reloads in frontend)
-- **program_edit_file**: Edit a file with search/replace (bumps version, auto-reloads in frontend)
-
-### When to Use an Existing Program
-IMPORTANT: Before creating a new program, always call `list_programs` first to check if a suitable
-program already exists. If the user asks for something that matches an existing program (e.g. "Let's
-play chess" and a "chess-board" program exists), use `open_program` to display it instead of creating
-a new one. You can then use `program_edit_file` or `program_write_file` to modify it if needed.
-
-### When to Create a Program
-- The user needs a visual interface (dashboard, form, game, chart)
-- A task benefits from interactive HTML rather than plain text
-- The user asks you to "show", "display", or "build" something visual
-- No suitable existing program was found via `list_programs`
-- Examples: chess board, expense tracker, data dashboard, quiz app
-
-### How to Create a Program
-1. Call `create_program` with a descriptive name, description, and initial HTML
-2. The HTML should be a complete, self-contained page (inline CSS/JS or use separate files)
-3. Use `program_write_file` to add CSS, JavaScript, or other files
-4. Use `program_edit_file` for targeted modifications to existing files
-5. Use `program_read_file` to inspect current file contents before editing
-
-### Bridge API (window.ownai)
-
-Every Canvas program automatically has access to `window.ownai`, a JavaScript API for communicating with the backend. Programs can use these methods:
-
-- **window.ownai.chat(prompt)**: Send a message to you (the AI agent) and get a response. Useful for programs that need AI-generated content.
-- **window.ownai.storeData(key, value)**: Persist a key-value pair for this program. Data is stored in the database and survives page reloads.
-- **window.ownai.loadData(key)**: Load a previously stored value by key. Returns null if the key does not exist.
-- **window.ownai.notify(message, delay_ms?)**: Show a notification to the user. Optional delay in milliseconds.
-- **window.ownai.readFile(path)**: Read a file from the workspace directory. Path must be relative.
-- **window.ownai.writeFile(path, content)**: Write a file to the workspace directory. Creates parent directories if needed.
-
-All methods return Promises. Example usage in a program:
-```javascript
-// Save game state
-await window.ownai.storeData("score", 42);
-// Load it back
-const score = await window.ownai.loadData("score");
-// Ask the AI something
-const answer = await window.ownai.chat("Suggest a next move");
-// Read workspace data
-const data = await window.ownai.readFile("data.json");
-```
-
-When creating programs that need persistence, use storeData/loadData. When programs need to interact with workspace files, use readFile/writeFile. The chat method is useful for AI-powered features within programs.
-
-### Best Practices
-- Use semantic, lowercase names with hyphens (e.g. "expense-tracker", "chess-board")
-- Start with a working index.html, then iterate
-- For complex apps, separate HTML, CSS, and JS into different files
-- Each write or edit automatically increments the program version
-- The user can view the program in a Canvas iframe beside the chat
-- Use the Bridge API (window.ownai) for persistence, AI interaction, and file access
+Tool documentation is automatically included for sub-agents -- you only need to provide a focused system prompt describing the sub-agent's role and approach.
 
 ## Memory System
 
@@ -819,9 +720,11 @@ When you see "[Context from memory]" above a message, that information comes fro
 4. **Be adaptive**: Learn from user feedback and adjust your style
 5. **Plan before acting**: For complex tasks, create a TODO list first
 6. **Extend yourself**: When you lack a capability, consider creating a tool for it
+7. **Delegate when appropriate**: For complex multi-step tasks, use delegate_task
 
 Remember: You are building a long-term relationship with this user."#,
-            name = instance_name
+            name = instance_name,
+            tools = base_tools_prompt(),
         )
     }
 
@@ -912,12 +815,13 @@ Remember: You are building a long-term relationship with this user."#,
                 );
 
                 // Convert extracted facts to memory entries and store them
-                let long_term_memory = self.context_builder.long_term_memory_mut();
+                let long_term_memory = self.context_builder.long_term_memory().clone();
+                let mut mem = long_term_memory.lock().await;
 
                 for fact_item in extraction.facts {
                     let entry = fact_extraction::to_memory_entry(fact_item, agent_msg_id);
 
-                    if let Err(e) = long_term_memory.store(entry).await {
+                    if let Err(e) = mem.store(entry).await {
                         tracing::warn!("Failed to store extracted fact: {}", e);
                     }
                 }

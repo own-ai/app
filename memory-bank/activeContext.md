@@ -2,7 +2,7 @@
 
 ## Current Work Focus
 
-The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**, **Phase 3 (Self-Programming)**, and **Steps 12-15 of Phase 4 (Canvas System Backend + Custom Protocol + Frontend + Bridge API)**. The next work is **Phase 4, Step 16 (Sub-Agent System)**.
+The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**, **Phase 3 (Self-Programming)**, and **Steps 12-16 of Phase 4 (Canvas System + Bridge API + Sub-Agent System)**. The next work is **Phase 4, Step 17 (Scheduled Tasks)**.
 
 ## What Has Been Built
 
@@ -55,6 +55,29 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 
 ## Recent Changes
 
+- **Step 16 (Sub-Agent System) COMPLETED**:
+  - Created `src-tauri/src/tools/subagents.rs` with dynamic sub-agent system:
+    - `ClientProvider` enum wrapping Anthropic/OpenAI/Ollama rig clients
+    - `DelegateTaskTool` (name="delegate_task") - main agent creates sub-agents on the fly
+    - `base_tools_prompt()` - prompt for tool documentation
+    - `build_sub_agent_tools()` - gives sub-agents ALL tools except delegate_task
+    - 5 unit tests
+  - Created `src-tauri/src/tools/memory_tools.rs` with 3 rig Tools:
+    - `SearchMemoryTool` (name="search_memory") - semantic search via SharedLongTermMemory
+    - `AddMemoryTool` (name="add_memory") - stores entries in long-term memory
+    - `DeleteMemoryTool` (name="delete_memory") - deletes memory entries by ID
+    - 9 unit tests
+  - Refactored `SharedLongTermMemory = Arc<Mutex<LongTermMemory>>` in `memory/long_term.rs`
+  - Updated `memory/context_builder.rs` to use SharedLongTermMemory
+  - Refactored `agent/mod.rs`:
+    - `create_tools()` now takes 10 args (added SharedLongTermMemory, ClientProvider, model)
+    - All 3 provider match arms updated (Anthropic/OpenAI/Ollama)
+    - `extract_and_store_facts()` uses shared lock pattern
+    - `system_prompt()` uses `base_tools_prompt()` (no more tool doc duplication)
+  - Updated `commands/memory.rs` to use SharedLongTermMemory with proper lock management
+  - 21 tools for main agent, 20 for sub-agents (all except delegate_task)
+  - All 154 tests pass, cargo clippy clean, cargo fmt clean
+
 - **Step 15 (Bridge API) COMPLETED**:
   - Created `src-tauri/src/canvas/bridge.rs` with full bridge module:
     - `BridgeRequest` enum (Chat, StoreData, LoadData, Notify, ReadFile, WriteFile)
@@ -83,7 +106,6 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 ## Next Steps
 
 ### Near-term (Phase 4 - Deep Agent Features)
-- Step 16: Sub-Agent System (code-writer, researcher, memory-manager)
 - Step 17: Scheduled Tasks (tokio-cron-scheduler)
 - Step 18: Dynamic System Prompt (final integration with all capabilities)
 
@@ -101,6 +123,10 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 - **Token Budget**: Working memory defaults to 50000 tokens; eviction removes 30% of messages when budget exceeded
 - **Database**: One SQLite file per AI instance for complete isolation
 - **Summarization**: Uses rig Extractor (not raw prompting) for structured JSON output
+- **Sub-Agent Architecture**: Dynamic (not predefined) - main agent creates sub-agents on the fly via delegate_task with custom system prompts
+- **Tool Documentation**: Via `base_tools_prompt()` in `subagents.rs` - used by both main agent and sub-agents
+- **SharedLongTermMemory**: `Arc<Mutex<LongTermMemory>>` for concurrent access by tools and context builder
+- **Memory Tools**: search_memory, add_memory, delete_memory available to ALL agents (main + sub-agents)
 - **Tool Registration**: Tools are created in `create_tools()` helper and passed to agent builder via `.tools()`
 - **Dynamic Tools**: SharedRegistry = `Arc<RwLock<RhaiToolRegistry>>` per agent instance for concurrent access
 - **Rhai Safety**: HTTPS-only HTTP, workspace-scoped filesystem, max operations limit, path traversal prevention
