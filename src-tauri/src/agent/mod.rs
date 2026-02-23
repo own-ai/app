@@ -769,12 +769,38 @@ a new one. You can then use `program_edit_file` or `program_write_file` to modif
 4. Use `program_edit_file` for targeted modifications to existing files
 5. Use `program_read_file` to inspect current file contents before editing
 
+### Bridge API (window.ownai)
+
+Every Canvas program automatically has access to `window.ownai`, a JavaScript API for communicating with the backend. Programs can use these methods:
+
+- **window.ownai.chat(prompt)**: Send a message to you (the AI agent) and get a response. Useful for programs that need AI-generated content.
+- **window.ownai.storeData(key, value)**: Persist a key-value pair for this program. Data is stored in the database and survives page reloads.
+- **window.ownai.loadData(key)**: Load a previously stored value by key. Returns null if the key does not exist.
+- **window.ownai.notify(message, delay_ms?)**: Show a notification to the user. Optional delay in milliseconds.
+- **window.ownai.readFile(path)**: Read a file from the workspace directory. Path must be relative.
+- **window.ownai.writeFile(path, content)**: Write a file to the workspace directory. Creates parent directories if needed.
+
+All methods return Promises. Example usage in a program:
+```javascript
+// Save game state
+await window.ownai.storeData("score", 42);
+// Load it back
+const score = await window.ownai.loadData("score");
+// Ask the AI something
+const answer = await window.ownai.chat("Suggest a next move");
+// Read workspace data
+const data = await window.ownai.readFile("data.json");
+```
+
+When creating programs that need persistence, use storeData/loadData. When programs need to interact with workspace files, use readFile/writeFile. The chat method is useful for AI-powered features within programs.
+
 ### Best Practices
 - Use semantic, lowercase names with hyphens (e.g. "expense-tracker", "chess-board")
 - Start with a working index.html, then iterate
 - For complex apps, separate HTML, CSS, and JS into different files
 - Each write or edit automatically increments the program version
 - The user can view the program in a Canvas iframe beside the chat
+- Use the Bridge API (window.ownai) for persistence, AI interaction, and file access
 
 ## Memory System
 

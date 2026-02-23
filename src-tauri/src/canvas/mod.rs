@@ -1,3 +1,4 @@
+pub mod bridge;
 pub mod protocol;
 pub mod storage;
 pub mod tools;

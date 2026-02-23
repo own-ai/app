@@ -1,11 +1,18 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
 import { X, Maximize2, Minimize2 } from "lucide-react";
 import { cn } from "@/utils/cn";
 import { IconButton } from "@/components/ui/IconButton";
 import { ProgramList } from "./ProgramList";
 import { useCanvasStore } from "@/stores/canvasStore";
 import { Program } from "@/types";
+
+interface BridgeResponse {
+  success: boolean;
+  data?: unknown;
+  error?: string;
+}
 
 interface CanvasPanelProps {
   instanceId: string;
@@ -47,6 +54,59 @@ export const CanvasPanel = ({
   const handleToggleFullscreen = useCallback(() => {
     setViewMode(viewMode === "canvas" ? "split" : "canvas");
   }, [viewMode, setViewMode]);
+
+  // Ref for the iframe element (used for postMessage responses)
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Bridge API: Listen for postMessage requests from the Canvas iframe
+  useEffect(() => {
+    const handleMessage = async (event: MessageEvent) => {
+      if (
+        !event.data ||
+        event.data.type !== "ownai-bridge-request" ||
+        !activeProgram
+      ) {
+        return;
+      }
+
+      const { requestId, method, params } = event.data;
+
+      try {
+        const response = await invoke<BridgeResponse>("bridge_request", {
+          instanceId,
+          programName: activeProgram.name,
+          method,
+          params: params || {},
+        });
+
+        // Send response back to the iframe
+        iframeRef.current?.contentWindow?.postMessage(
+          {
+            type: "ownai-bridge-response",
+            requestId,
+            success: response.success,
+            data: response.data,
+            error: response.error,
+          },
+          "*",
+        );
+      } catch (error) {
+        // Send error response back to the iframe
+        iframeRef.current?.contentWindow?.postMessage(
+          {
+            type: "ownai-bridge-response",
+            requestId,
+            success: false,
+            error: String(error),
+          },
+          "*",
+        );
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [instanceId, activeProgram]);
 
   return (
     <div className="flex flex-col h-full bg-background border-l border-border">
@@ -105,6 +165,7 @@ export const CanvasPanel = ({
         </div>
       ) : activeProgram && programUrl ? (
         <iframe
+          ref={iframeRef}
           src={programUrl}
           title={activeProgram.name}
           className={cn("flex-1 w-full border-0 bg-white")}

@@ -1,7 +1,10 @@
 use std::path::{Component, Path, PathBuf};
 
+use super::bridge;
+
 /// Load a file from a program directory.
 /// Returns the file bytes and MIME type.
+/// For HTML files, the Bridge API script is automatically injected.
 pub fn load_program_file(
     programs_root: &Path,
     program_name: &str,
@@ -38,7 +41,49 @@ pub fn load_program_file(
 
     let mime = guess_mime_type(file_path);
 
+    // For HTML files, inject the Bridge API script
+    let bytes = if mime == "text/html" {
+        inject_bridge_script(&bytes)
+    } else {
+        bytes
+    };
+
     Ok((bytes, mime))
+}
+
+/// Inject the Bridge API JavaScript into an HTML file.
+/// Inserts the script before `</head>` if present, otherwise before `</body>`,
+/// otherwise prepends it to the document.
+fn inject_bridge_script(html_bytes: &[u8]) -> Vec<u8> {
+    let html = String::from_utf8_lossy(html_bytes);
+    let script = bridge::bridge_script();
+
+    // Try to insert before </head>
+    if let Some(pos) = html.to_lowercase().find("</head>") {
+        let mut result = String::with_capacity(html.len() + script.len());
+        result.push_str(&html[..pos]);
+        result.push_str(script);
+        result.push('\n');
+        result.push_str(&html[pos..]);
+        return result.into_bytes();
+    }
+
+    // Try to insert before </body>
+    if let Some(pos) = html.to_lowercase().find("</body>") {
+        let mut result = String::with_capacity(html.len() + script.len());
+        result.push_str(&html[..pos]);
+        result.push_str(script);
+        result.push('\n');
+        result.push_str(&html[pos..]);
+        return result.into_bytes();
+    }
+
+    // Fallback: prepend the script
+    let mut result = String::with_capacity(html.len() + script.len() + 1);
+    result.push_str(script);
+    result.push('\n');
+    result.push_str(&html);
+    result.into_bytes()
 }
 
 /// Parse a protocol URL into (instance_id, program_name, file_path).
@@ -160,18 +205,73 @@ mod tests {
     }
 
     #[test]
-    fn test_load_program_file_success() {
+    fn test_load_program_file_html_has_bridge_script() {
         let temp_dir = TempDir::new().unwrap();
         let programs_root = temp_dir.path();
 
-        // Create program directory with a file
         let program_dir = programs_root.join("chess");
         fs::create_dir_all(&program_dir).unwrap();
-        fs::write(program_dir.join("index.html"), "<html>Chess</html>").unwrap();
+        fs::write(
+            program_dir.join("index.html"),
+            "<html><head><title>Chess</title></head><body>Game</body></html>",
+        )
+        .unwrap();
 
         let (bytes, mime) = load_program_file(programs_root, "chess", "index.html").unwrap();
-        assert_eq!(String::from_utf8(bytes).unwrap(), "<html>Chess</html>");
+        let content = String::from_utf8(bytes).unwrap();
         assert_eq!(mime, "text/html");
+        // Bridge script should be injected before </head>
+        assert!(content.contains("window.ownai"));
+        assert!(content.contains("ownai-bridge-request"));
+        // Original content should still be present
+        assert!(content.contains("<title>Chess</title>"));
+        assert!(content.contains("Game"));
+    }
+
+    #[test]
+    fn test_load_program_file_css_no_bridge_script() {
+        let temp_dir = TempDir::new().unwrap();
+        let programs_root = temp_dir.path();
+
+        let program_dir = programs_root.join("chess");
+        fs::create_dir_all(&program_dir).unwrap();
+        fs::write(program_dir.join("style.css"), "body { margin: 0; }").unwrap();
+
+        let (bytes, mime) = load_program_file(programs_root, "chess", "style.css").unwrap();
+        let content = String::from_utf8(bytes).unwrap();
+        assert_eq!(mime, "text/css");
+        assert_eq!(content, "body { margin: 0; }");
+        assert!(!content.contains("window.ownai"));
+    }
+
+    #[test]
+    fn test_inject_bridge_script_before_head() {
+        let html = b"<html><head><title>Test</title></head><body></body></html>";
+        let result = String::from_utf8(inject_bridge_script(html)).unwrap();
+        assert!(result.contains("window.ownai"));
+        // Script should appear before </head>
+        let script_pos = result.find("window.ownai").unwrap();
+        let head_close_pos = result.find("</head>").unwrap();
+        assert!(script_pos < head_close_pos);
+    }
+
+    #[test]
+    fn test_inject_bridge_script_before_body_no_head() {
+        let html = b"<html><body>Hello</body></html>";
+        let result = String::from_utf8(inject_bridge_script(html)).unwrap();
+        assert!(result.contains("window.ownai"));
+        let script_pos = result.find("window.ownai").unwrap();
+        let body_close_pos = result.find("</body>").unwrap();
+        assert!(script_pos < body_close_pos);
+    }
+
+    #[test]
+    fn test_inject_bridge_script_fallback_prepend() {
+        let html = b"<div>No head or body tags</div>";
+        let result = String::from_utf8(inject_bridge_script(html)).unwrap();
+        assert!(result.contains("window.ownai"));
+        // Script should be at the beginning
+        assert!(result.starts_with("<script>"));
     }
 
     #[test]

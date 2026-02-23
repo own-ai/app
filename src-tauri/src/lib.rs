@@ -125,6 +125,7 @@ pub fn run() {
             commands::canvas::list_programs,
             commands::canvas::delete_program,
             commands::canvas::get_program_url,
+            commands::canvas::bridge_request,
             // Workspace
             commands::workspace::open_workspace,
         ])

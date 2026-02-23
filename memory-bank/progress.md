@@ -5,7 +5,7 @@
 **Phase 1 (Foundation)**: Complete
 **Phase 2 (Memory System)**: Complete
 **Phase 3 (Self-Programming / Rhai)**: Complete
-**Phase 4 (Deep Agent Features)**: Steps 12-14 complete (Canvas Backend + Protocol + Frontend), next: Step 15 (Bridge API)
+**Phase 4 (Deep Agent Features)**: Steps 12-15 complete (Canvas Backend + Protocol + Frontend + Bridge API), next: Step 16 (Sub-Agent System)
 **Phase 5-7 (Polish, Testing, Release)**: Not started
 
 ## What Works
@@ -37,7 +37,7 @@
 - [x] Per-instance databases at `~/.ownai/instances/{id}/ownai.db`
 - [x] API key storage via OS keychain (keyring crate)
 - [x] AgentCache for lazy agent initialization per instance
-- [x] 27 Tauri commands registered and functional
+- [x] 28 Tauri commands registered and functional
 - [x] Working Memory with VecDeque and token budget (50000 tokens default, 30% eviction)
 - [x] Summarization via LLM Extractor (rig Extractor with SummaryResponse JsonSchema struct)
 - [x] Long-term Memory with fastembed (local Qwen3-Embedding-0.6B embeddings)
@@ -62,12 +62,14 @@
 - [x] Canvas Frontend (CanvasPanel with iframe, ProgramList, canvasStore, split-view layout, auto-detection)
 - [x] open_program tool (backend emits event, frontend opens program in split view)
 - [x] Auto-reload on program updates (ProgramWriteFile/EditFile emit event, frontend refreshes iframe)
+- [x] Bridge API (postMessage communication: window.ownai with chat, storeData, loadData, notify, readFile, writeFile)
+- [x] Bridge script injection into HTML files served via ownai-program:// protocol
+- [x] Per-program key-value storage (program_data table)
+- [x] Bridge API system prompt documentation
 
 ## What's Left to Build
 
 ### Phase 4 - Deep Agent Features
-- [ ] **Bridge API**: postMessage communication between Canvas apps and backend
-  - [ ] chat(), storeData(), loadData(), notify(), readFile(), writeFile()
 - [ ] **Sub-Agent System**: TaskTool for delegating to specialized sub-agents
   - [ ] code-writer sub-agent
   - [ ] researcher sub-agent
@@ -128,3 +130,4 @@
 11. **Self-Programming Architecture**: Agent writes Rhai code directly and uses create_tool/read_tool/update_tool instead of a separate CodeGenerationAgent with internal LLM calls
 12. **Canvas Program Identity**: Programs identified by name (not UUID), chosen by the agent, similar to dynamic Rhai tools
 13. **Canvas Tool Design**: Filesystem-like tools (program_write_file, program_edit_file) instead of monolithic save/update, agent does not know instance_id
+14. **Bridge API File Scope**: readFile/writeFile in Bridge API scoped to workspace directory (not program directory), giving Canvas programs access to shared workspace data

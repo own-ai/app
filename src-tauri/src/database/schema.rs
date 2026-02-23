@@ -131,6 +131,22 @@ pub async fn create_tables(pool: &Pool<Sqlite>) -> Result<()> {
     .await
     .context("Failed to create programs index")?;
 
+    // Program data table (key-value storage per program, used by Bridge API)
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS program_data (
+            program_name TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            updated_at DATETIME NOT NULL,
+            PRIMARY KEY (program_name, key)
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create program_data table")?;
+
     tracing::debug!("Database tables created successfully");
 
     Ok(())
