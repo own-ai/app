@@ -10,7 +10,9 @@ use rig::providers::{anthropic, ollama, openai};
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
 use rig::tool::ToolDyn;
 use sqlx::{Pool, Row, Sqlite};
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 use tauri::{AppHandle, Manager};
 
 use crate::ai_instances::{AIInstance, APIKeyStorage, LLMProvider};
@@ -20,7 +22,7 @@ use crate::canvas::tools::{
 };
 use crate::memory::{
     fact_extraction, working_memory::Message, ContextBuilder, FactExtractionResponse,
-    LongTermMemory, SessionSummary, SharedLongTermMemory, SummarizationAgent, SummaryResponse,
+    LongTermMemory, SharedLongTermMemory, SummarizationAgent, SummaryExtractor, SummaryResponse,
     WorkingMemory,
 };
 use crate::scheduler::{
@@ -191,14 +193,18 @@ enum SummaryExtractorProvider {
     Ollama(Extractor<ollama::CompletionModel, SummaryResponse>),
 }
 
-impl SummaryExtractorProvider {
-    /// Extract a structured summary from the given text
-    async fn extract(&self, text: &str) -> Result<SummaryResponse> {
-        match self {
-            Self::Anthropic(e) => Ok(e.extract(text).await?),
-            Self::OpenAI(e) => Ok(e.extract(text).await?),
-            Self::Ollama(e) => Ok(e.extract(text).await?),
-        }
+impl SummaryExtractor for SummaryExtractorProvider {
+    fn extract_summary<'a>(
+        &'a self,
+        text: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<SummaryResponse>> + Send + 'a>> {
+        Box::pin(async move {
+            match self {
+                Self::Anthropic(e) => Ok(e.extract(text).await?),
+                Self::OpenAI(e) => Ok(e.extract(text).await?),
+                Self::Ollama(e) => Ok(e.extract(text).await?),
+            }
+        })
     }
 }
 
@@ -224,7 +230,6 @@ impl FactExtractorProvider {
 /// OwnAI Agent with Memory, Tools, and LLM integration
 pub struct OwnAIAgent {
     agent: AgentProvider,
-    summary_extractor: SummaryExtractorProvider,
     fact_extractor: FactExtractorProvider,
     context_builder: ContextBuilder,
     db: Pool<Sqlite>,
@@ -448,9 +453,13 @@ impl OwnAIAgent {
             }
         };
 
+        // Set the summary extractor on the SummarizationAgent (owned by ContextBuilder)
+        context_builder
+            .summarization_agent_mut()
+            .set_extractor(Box::new(summary_extractor));
+
         Ok(OwnAIAgent {
             agent,
-            summary_extractor,
             fact_extractor,
             context_builder,
             db,
@@ -465,58 +474,17 @@ impl OwnAIAgent {
     }
 
     /// Summarize evicted messages using the LLM extractor and save to database.
-    /// Called automatically when working memory exceeds its token budget.
+    /// Delegates to `SummarizationAgent::summarize_and_save` which handles
+    /// LLM extraction, persistence, and message linking.
     async fn summarize_evicted(&self, evicted: Vec<Message>) -> Result<()> {
         if evicted.is_empty() {
             return Ok(());
         }
 
-        tracing::info!(
-            "Summarizing {} evicted messages via LLM extractor",
-            evicted.len()
-        );
-
-        // Format messages for the extractor
-        let conversation_text = evicted
-            .iter()
-            .map(|m| format!("{}: {}", m.role, m.content))
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        // Use rig Extractor for type-safe structured output
-        let extracted = self.summary_extractor.extract(&conversation_text).await?;
-
-        // Build SessionSummary from extracted data
-        let summary = SessionSummary {
-            id: uuid::Uuid::new_v4().to_string(),
-            start_message_id: evicted.first().unwrap().id.clone(),
-            end_message_id: evicted.last().unwrap().id.clone(),
-            summary_text: extracted.summary,
-            key_facts: extracted.key_facts,
-            tools_mentioned: extracted.tools_used,
-            topics: extracted.topics,
-            timestamp: Utc::now(),
-            token_savings: evicted
-                .iter()
-                .map(|m| (m.content.len() + m.role.len()) / 4)
-                .sum(),
-        };
-
-        // Save summary and link messages
-        let summarization_agent = self.context_builder.summarization_agent();
-        summarization_agent.save_summary(&summary).await?;
-
-        let message_ids: Vec<String> = evicted.iter().map(|m| m.id.clone()).collect();
-        summarization_agent
-            .link_messages_to_summary(&message_ids, &summary.id)
+        self.context_builder
+            .summarization_agent()
+            .summarize_and_save(&evicted)
             .await?;
-
-        tracing::info!(
-            "Saved LLM summary {} for {} messages (saved ~{} tokens)",
-            summary.id,
-            evicted.len(),
-            summary.token_savings
-        );
 
         Ok(())
     }

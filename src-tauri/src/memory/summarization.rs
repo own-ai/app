@@ -3,6 +3,19 @@ use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sqlx::{Pool, Row, Sqlite};
+use std::future::Future;
+use std::pin::Pin;
+
+use super::working_memory::Message;
+
+/// Trait for LLM-based summary extraction, abstracting over providers.
+/// Implementations wrap provider-specific rig Extractors.
+pub trait SummaryExtractor: Send + Sync {
+    fn extract_summary<'a>(
+        &'a self,
+        text: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<SummaryResponse>> + Send + 'a>>;
+}
 
 /// A session summary containing compressed conversation history
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,23 +47,27 @@ pub struct SummaryResponse {
     pub topics: Vec<String>,
 }
 
-/// Message structure for summarization
-#[derive(Debug, Clone)]
-pub struct Message {
-    pub id: String,
-    pub role: String,
-    pub content: String,
-}
-
-/// Summarization agent that uses LLM to create concise summaries
+/// Summarization agent that uses LLM to create concise summaries.
+/// Owns the summary extractor and handles all summarization logic
+/// including LLM extraction, database persistence, and message linking.
 pub struct SummarizationAgent {
     db: Pool<Sqlite>,
+    extractor: Option<Box<dyn SummaryExtractor>>,
 }
 
 impl SummarizationAgent {
-    /// Create new summarization agent
+    /// Create new summarization agent (without extractor).
+    /// Call `set_extractor` to enable LLM-based summarization.
     pub fn new(db: Pool<Sqlite>) -> Self {
-        Self { db }
+        Self {
+            db,
+            extractor: None,
+        }
+    }
+
+    /// Set the LLM summary extractor. Must be called before `summarize_and_save`.
+    pub fn set_extractor(&mut self, extractor: Box<dyn SummaryExtractor>) {
+        self.extractor = Some(extractor);
     }
 
     /// Initialize summaries table
@@ -93,32 +110,65 @@ impl SummarizationAgent {
         Ok(())
     }
 
-    /// Summarize a list of messages
-    /// For now, this creates a basic summary without LLM
-    /// In Phase 3, we'll integrate with rig-core for proper LLM summarization
-    pub async fn summarize_messages(&self, messages: &[Message]) -> Result<SessionSummary> {
+    /// Summarize evicted messages using the LLM extractor, save to database,
+    /// and link messages to the created summary.
+    ///
+    /// This is the main entry point for summarization. It:
+    /// 1. Formats messages as conversation text
+    /// 2. Extracts a structured summary via the LLM extractor
+    /// 3. Saves the summary to the database
+    /// 4. Links the original messages to the summary
+    pub async fn summarize_and_save(&self, messages: &[Message]) -> Result<SessionSummary> {
         if messages.is_empty() {
             anyhow::bail!("Cannot summarize empty message list");
         }
 
-        // Create basic summary for now
-        let summary_text = self.create_basic_summary(messages);
-        let key_facts = self.extract_basic_facts(messages);
+        let extractor = self
+            .extractor
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No summary extractor configured"))?;
+
+        tracing::info!("Summarizing {} messages via LLM extractor", messages.len());
+
+        // Format messages for the extractor
+        let conversation_text = messages
+            .iter()
+            .map(|m| format!("{}: {}", m.role, m.content))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Use LLM extractor for type-safe structured output
+        let extracted = extractor.extract_summary(&conversation_text).await?;
+
+        // Estimate token savings
+        let token_savings: usize = messages
+            .iter()
+            .map(|m| (m.content.len() + m.role.len()) / 4)
+            .sum();
 
         let summary = SessionSummary {
             id: uuid::Uuid::new_v4().to_string(),
             start_message_id: messages.first().unwrap().id.clone(),
             end_message_id: messages.last().unwrap().id.clone(),
-            summary_text,
-            key_facts,
-            tools_mentioned: Vec::new(),
-            topics: Vec::new(),
+            summary_text: extracted.summary,
+            key_facts: extracted.key_facts,
+            tools_mentioned: extracted.tools_used,
+            topics: extracted.topics,
             timestamp: Utc::now(),
-            token_savings: self.estimate_token_savings(messages),
+            token_savings,
         };
 
+        // Save summary to database
+        self.save_summary(&summary).await?;
+
+        // Link messages to their summary
+        let message_ids: Vec<String> = messages.iter().map(|m| m.id.clone()).collect();
+        self.link_messages_to_summary(&message_ids, &summary.id)
+            .await?;
+
         tracing::info!(
-            "Created summary for {} messages (saved ~{} tokens)",
+            "Saved LLM summary {} for {} messages (saved ~{} tokens)",
+            summary.id,
             messages.len(),
             summary.token_savings
         );
@@ -210,40 +260,6 @@ impl SummarizationAgent {
         Ok(summaries)
     }
 
-    /// Create a basic summary without LLM (placeholder for Phase 3)
-    fn create_basic_summary(&self, messages: &[Message]) -> String {
-        let user_count = messages.iter().filter(|m| m.role == "user").count();
-        let agent_count = messages.iter().filter(|m| m.role == "agent").count();
-
-        format!(
-            "Conversation with {} user messages and {} agent responses. \
-             Topics discussed include various queries and responses.",
-            user_count, agent_count
-        )
-    }
-
-    /// Extract basic facts (placeholder for Phase 3 LLM extraction)
-    fn extract_basic_facts(&self, messages: &[Message]) -> Vec<String> {
-        // For now, just return message count as a fact
-        vec![format!(
-            "Conversation contained {} messages",
-            messages.len()
-        )]
-    }
-
-    /// Estimate token savings from summarization
-    fn estimate_token_savings(&self, messages: &[Message]) -> usize {
-        let original_tokens: usize = messages
-            .iter()
-            .map(|m| (m.content.len() + m.role.len()) / 4)
-            .sum();
-
-        // Assume summary is ~10% of original size
-        let summary_tokens = original_tokens / 10;
-
-        original_tokens.saturating_sub(summary_tokens)
-    }
-
     /// Get total count of summaries in database
     pub async fn count_summaries(&self) -> Result<i64> {
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM summaries")
@@ -256,6 +272,28 @@ impl SummarizationAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Mock extractor for testing without a real LLM
+    struct MockExtractor;
+
+    impl SummaryExtractor for MockExtractor {
+        fn extract_summary<'a>(
+            &'a self,
+            _text: &'a str,
+        ) -> Pin<Box<dyn Future<Output = Result<SummaryResponse>> + Send + 'a>> {
+            Box::pin(async {
+                Ok(SummaryResponse {
+                    summary: "Mock summary of the conversation.".to_string(),
+                    key_facts: vec![
+                        "User is learning Rust".to_string(),
+                        "Discussed ownership".to_string(),
+                    ],
+                    tools_used: vec!["read_file".to_string()],
+                    topics: vec!["Rust".to_string(), "Programming".to_string()],
+                })
+            })
+        }
+    }
 
     /// Helper: create an in-memory SQLite database with the messages table
     async fn setup_test_db() -> Pool<Sqlite> {
@@ -284,6 +322,16 @@ mod tests {
         pool
     }
 
+    fn create_test_message(id: &str, role: &str, content: &str) -> Message {
+        Message {
+            id: id.to_string(),
+            role: role.to_string(),
+            content: content.to_string(),
+            timestamp: Utc::now(),
+            importance_score: 0.5,
+        }
+    }
+
     fn create_test_summary(id: &str) -> SessionSummary {
         SessionSummary {
             id: id.to_string(),
@@ -299,6 +347,18 @@ mod tests {
             timestamp: Utc::now(),
             token_savings: 500,
         }
+    }
+
+    /// Helper: insert a message row into the test database (for FK constraints)
+    async fn insert_test_message_row(db: &Pool<Sqlite>, id: &str) {
+        sqlx::query("INSERT INTO messages (id, role, content, timestamp) VALUES (?, ?, ?, ?)")
+            .bind(id)
+            .bind("user")
+            .bind("content")
+            .bind(Utc::now())
+            .execute(db)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -317,22 +377,8 @@ mod tests {
         agent.init_table().await.unwrap();
 
         // Insert referenced messages first (for foreign key)
-        sqlx::query("INSERT INTO messages (id, role, content, timestamp) VALUES (?, ?, ?, ?)")
-            .bind("msg_start")
-            .bind("user")
-            .bind("Hello")
-            .bind(Utc::now())
-            .execute(&agent.db)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO messages (id, role, content, timestamp) VALUES (?, ?, ?, ?)")
-            .bind("msg_end")
-            .bind("agent")
-            .bind("Hi there!")
-            .bind(Utc::now())
-            .execute(&agent.db)
-            .await
-            .unwrap();
+        insert_test_message_row(&agent.db, "msg_start").await;
+        insert_test_message_row(&agent.db, "msg_end").await;
 
         // Save summary
         let summary = create_test_summary("summary_1");
@@ -360,14 +406,7 @@ mod tests {
 
         // Insert referenced messages
         for id in ["msg_start", "msg_end", "msg_start2", "msg_end2"] {
-            sqlx::query("INSERT INTO messages (id, role, content, timestamp) VALUES (?, ?, ?, ?)")
-                .bind(id)
-                .bind("user")
-                .bind("content")
-                .bind(Utc::now())
-                .execute(&agent.db)
-                .await
-                .unwrap();
+            insert_test_message_row(&agent.db, id).await;
         }
 
         assert_eq!(agent.count_summaries().await.unwrap(), 0);
@@ -394,14 +433,7 @@ mod tests {
         // Create messages
         let msg_ids: Vec<String> = (0..3).map(|i| format!("msg_{}", i)).collect();
         for id in &msg_ids {
-            sqlx::query("INSERT INTO messages (id, role, content, timestamp) VALUES (?, ?, ?, ?)")
-                .bind(id)
-                .bind("user")
-                .bind("test content")
-                .bind(Utc::now())
-                .execute(&agent.db)
-                .await
-                .unwrap();
+            insert_test_message_row(&agent.db, id).await;
         }
 
         // Save summary
@@ -437,14 +469,7 @@ mod tests {
 
         // Create messages for foreign keys
         for i in 0..6 {
-            sqlx::query("INSERT INTO messages (id, role, content, timestamp) VALUES (?, ?, ?, ?)")
-                .bind(format!("m{}", i))
-                .bind("user")
-                .bind("content")
-                .bind(Utc::now())
-                .execute(&agent.db)
-                .await
-                .unwrap();
+            insert_test_message_row(&agent.db, &format!("m{}", i)).await;
         }
 
         // Save 3 summaries
@@ -466,42 +491,70 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_summarize_messages_basic() {
+    async fn test_summarize_and_save_with_mock_extractor() {
         let db = setup_test_db().await;
-        let agent = SummarizationAgent::new(db);
+        let mut agent = SummarizationAgent::new(db);
+        agent.init_table().await.unwrap();
+        agent.set_extractor(Box::new(MockExtractor));
+
+        // Insert message rows into DB (for FK constraints)
+        for id in ["m1", "m2", "m3"] {
+            insert_test_message_row(&agent.db, id).await;
+        }
 
         let messages = vec![
-            Message {
-                id: "m1".to_string(),
-                role: "user".to_string(),
-                content: "Hello, I need help with Rust.".to_string(),
-            },
-            Message {
-                id: "m2".to_string(),
-                role: "agent".to_string(),
-                content: "Sure, what do you need help with?".to_string(),
-            },
-            Message {
-                id: "m3".to_string(),
-                role: "user".to_string(),
-                content: "How does ownership work?".to_string(),
-            },
+            create_test_message("m1", "user", "Hello, I need help with Rust."),
+            create_test_message("m2", "agent", "Sure, what do you need help with?"),
+            create_test_message("m3", "user", "How does ownership work?"),
         ];
 
-        let summary = agent.summarize_messages(&messages).await.unwrap();
+        let summary = agent.summarize_and_save(&messages).await.unwrap();
 
         assert_eq!(summary.start_message_id, "m1");
         assert_eq!(summary.end_message_id, "m3");
-        assert!(!summary.summary_text.is_empty());
+        assert_eq!(summary.summary_text, "Mock summary of the conversation.");
+        assert_eq!(summary.key_facts.len(), 2);
+        assert_eq!(summary.tools_mentioned, vec!["read_file"]);
+        assert_eq!(summary.topics, vec!["Rust", "Programming"]);
         assert!(summary.token_savings > 0);
+
+        // Verify it was persisted
+        let summaries = agent.get_recent_summaries(10).await.unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, summary.id);
+
+        // Verify messages were linked
+        let linked: Vec<(String,)> =
+            sqlx::query_as("SELECT summary_id FROM messages WHERE summary_id IS NOT NULL")
+                .fetch_all(&agent.db)
+                .await
+                .unwrap();
+        assert_eq!(linked.len(), 3);
     }
 
     #[tokio::test]
-    async fn test_summarize_empty_messages_fails() {
+    async fn test_summarize_and_save_empty_messages_fails() {
+        let db = setup_test_db().await;
+        let mut agent = SummarizationAgent::new(db);
+        agent.set_extractor(Box::new(MockExtractor));
+
+        let result = agent.summarize_and_save(&[]).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_summarize_and_save_without_extractor_fails() {
         let db = setup_test_db().await;
         let agent = SummarizationAgent::new(db);
+        agent.init_table().await.unwrap();
 
-        let result = agent.summarize_messages(&[]).await;
+        let messages = vec![create_test_message("m1", "user", "Hello")];
+
+        let result = agent.summarize_and_save(&messages).await;
         assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No summary extractor configured"));
     }
 }

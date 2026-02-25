@@ -106,4 +106,9 @@ impl ContextBuilder {
     pub fn summarization_agent(&self) -> &SummarizationAgent {
         &self.summarization_agent
     }
+
+    /// Get mutable summarization agent reference (e.g. to set the extractor)
+    pub fn summarization_agent_mut(&mut self) -> &mut SummarizationAgent {
+        &mut self.summarization_agent
+    }
 }
