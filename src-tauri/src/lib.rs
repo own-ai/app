@@ -24,6 +24,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .register_asynchronous_uri_scheme_protocol("ownai-program", |_ctx, request, responder| {
             // Custom protocol handler for serving Canvas program files.
             // All file I/O here is synchronous (std::fs::read), which is fine

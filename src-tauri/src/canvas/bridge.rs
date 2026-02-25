@@ -9,6 +9,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::{Pool, Row, Sqlite};
 use std::path::{Component, Path, PathBuf};
+use tauri::AppHandle;
 use tokio::fs;
 
 // ---------------------------------------------------------------------------
@@ -163,10 +164,55 @@ pub async fn handle_load_data(db: &Pool<Sqlite>, program_name: &str, key: &str) 
 }
 
 /// Handle a notify bridge request.
-pub async fn handle_notify(message: &str, _delay_ms: Option<u64>) -> BridgeResponse {
-    // Placeholder: log the notification (same pattern as Rhai send_notification)
-    tracing::info!("Bridge notification: {}", message);
-    BridgeResponse::ok_empty()
+///
+/// Sends a native OS notification via `tauri-plugin-notification` when an
+/// `AppHandle` is available. The `instance_name` is used as the notification
+/// title. If `delay_ms` is provided, the notification is delayed accordingly.
+/// Without an `AppHandle` (e.g. in tests), the notification is logged only.
+pub async fn handle_notify(
+    app_handle: Option<&AppHandle>,
+    instance_name: &str,
+    message: &str,
+    delay_ms: Option<u64>,
+) -> BridgeResponse {
+    // Apply optional delay
+    if let Some(ms) = delay_ms {
+        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+    }
+
+    match app_handle {
+        Some(handle) => {
+            use tauri_plugin_notification::NotificationExt;
+            match handle
+                .notification()
+                .builder()
+                .title(instance_name)
+                .body(message)
+                .show()
+            {
+                Ok(()) => {
+                    tracing::info!(
+                        "Bridge notification sent - title: '{}', body: '{}'",
+                        instance_name,
+                        message
+                    );
+                    BridgeResponse::ok_empty()
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to send bridge notification: {}", e);
+                    BridgeResponse::err(format!("Notification failed: {}", e))
+                }
+            }
+        }
+        None => {
+            tracing::info!(
+                "Bridge notification (no AppHandle) - title: '{}', body: '{}'",
+                instance_name,
+                message
+            );
+            BridgeResponse::ok_empty()
+        }
+    }
 }
 
 /// Resolves a user-provided relative path within a root directory.
@@ -378,8 +424,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_notify() {
-        let response = handle_notify("Test notification", None).await;
+    async fn test_handle_notify_without_app_handle() {
+        let response = handle_notify(None, "ownAI", "Test notification", None).await;
         assert!(response.success);
     }
 

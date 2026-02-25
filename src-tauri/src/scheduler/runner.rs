@@ -161,7 +161,12 @@ async fn execute_task(
     let programs_root = paths::get_instance_programs_path(instance_id)
         .unwrap_or_else(|_| PathBuf::from("./programs"));
 
-    let rhai_registry = RhaiToolRegistry::new(db.clone(), workspace);
+    let rhai_registry = RhaiToolRegistry::new(
+        db.clone(),
+        workspace,
+        Some(app_handle.clone()),
+        Some(instance.name.clone()),
+    );
     let available_dynamic_tools = rhai_registry.tool_summary().await.unwrap_or_default();
     let registry: SharedRegistry = Arc::new(tokio::sync::RwLock::new(rhai_registry));
 

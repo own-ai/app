@@ -156,7 +156,15 @@ pub async fn bridge_request(
                 .ok_or("Missing 'message' parameter")?;
             let delay_ms = params.get("delay_ms").and_then(|v| v.as_u64());
 
-            Ok(bridge::handle_notify(message, delay_ms).await)
+            // Resolve instance name for notification title
+            let manager = instance_manager.lock().await;
+            let instance_name = manager
+                .get_instance(&instance_id)
+                .map(|i| i.name.clone())
+                .unwrap_or_else(|| "ownAI".to_string());
+            drop(manager);
+
+            Ok(bridge::handle_notify(Some(&app_handle), &instance_name, message, delay_ms).await)
         }
 
         "readFile" => {

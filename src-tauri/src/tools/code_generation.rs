@@ -27,7 +27,7 @@ use super::rhai_engine::create_sandboxed_engine;
 /// Returns `Ok(warnings)` where `warnings` is a (possibly empty) list of
 /// advisory messages. Returns `Err` if the script fails to compile.
 pub fn validate_script(script: &str, workspace: &Path) -> Result<Vec<String>, String> {
-    let engine = create_sandboxed_engine(workspace.to_path_buf());
+    let engine = create_sandboxed_engine(workspace.to_path_buf(), None, None);
     engine
         .compile(script)
         .map_err(|e| format!("Compilation error: {}", e))?;
@@ -504,7 +504,7 @@ mod tests {
 
     async fn test_registry() -> SharedRegistry {
         let db = test_db().await;
-        let registry = RhaiToolRegistry::new(db, test_workspace());
+        let registry = RhaiToolRegistry::new(db, test_workspace(), None, None);
         Arc::new(RwLock::new(registry))
     }
 

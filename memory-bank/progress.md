@@ -50,6 +50,7 @@
 - [x] Workspace directory per instance at `~/.ownai/instances/{id}/workspace/`
 - [x] Programs directory per instance at `~/.ownai/instances/{id}/programs/`
 - [x] Tracing/logging setup
+- [x] Native OS notifications via tauri-plugin-notification (Rhai send_notification + Canvas Bridge notify)
 - [x] Sandboxed Rhai scripting engine (14 safe functions, security limits)
 - [x] Tool Registry (RhaiToolRegistry with SQLite, AST caching, execution logging, usage stats)
 - [x] RhaiExecuteTool bridge (rig Tool -> Rhai script execution)
@@ -112,7 +113,6 @@
 ## Known Issues
 
 - No known blocking issues at this time
-- send_notification is a placeholder (logs only) until Tauri notification plugin is integrated
 
 ## Evolution of Project Decisions
 

@@ -8,6 +8,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use regex::Regex;
 use rhai::{Dynamic, Engine, Map};
 use std::path::{Component, Path, PathBuf};
+use tauri::AppHandle;
 
 // ---------------------------------------------------------------------------
 // Engine creation
@@ -28,7 +29,16 @@ const HTTP_TIMEOUT_SECS: u64 = 30;
 ///
 /// The `workspace` path defines the root directory for all file operations.
 /// Scripts cannot access anything outside this directory.
-pub fn create_sandboxed_engine(workspace: PathBuf) -> Engine {
+///
+/// When `app_handle` is provided, `send_notification(title, body)` will send
+/// real native OS notifications via `tauri-plugin-notification`. If the title
+/// is empty, `instance_name` is used as default. Without an `AppHandle`
+/// (e.g. in tests), notifications are logged only.
+pub fn create_sandboxed_engine(
+    workspace: PathBuf,
+    app_handle: Option<AppHandle>,
+    instance_name: Option<String>,
+) -> Engine {
     let mut engine = Engine::new();
 
     // -- Security limits --
@@ -74,7 +84,20 @@ pub fn create_sandboxed_engine(workspace: PathBuf) -> Engine {
 
     // -- System functions --
     engine.register_fn("get_current_datetime", safe_get_current_datetime);
-    engine.register_fn("send_notification", safe_send_notification);
+
+    // -- Notification function --
+    let default_title = instance_name.unwrap_or_else(|| "ownAI".to_string());
+    engine.register_fn(
+        "send_notification",
+        move |title: String, body: String| -> String {
+            let effective_title = if title.trim().is_empty() {
+                default_title.clone()
+            } else {
+                title
+            };
+            send_notification_impl(app_handle.as_ref(), &effective_title, &body)
+        },
+    );
 
     engine
 }
@@ -412,21 +435,41 @@ fn safe_get_current_datetime() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
-/// Send a system notification.
+/// Send a system notification via `tauri-plugin-notification` if an `AppHandle`
+/// is available, otherwise fall back to logging only (e.g. in tests).
 ///
-/// Note: This is a placeholder that logs the notification. Full system
-/// notification support requires the Tauri notification plugin which will
-/// be integrated in a later phase.
-fn safe_send_notification(title: String, body: String) -> String {
-    tracing::info!(
-        "Notification requested - title: '{}', body: '{}'",
-        title,
-        body
-    );
-    format!(
-        "Notification queued: '{}' - '{}' (system notifications will be available in a future update)",
-        title, body
-    )
+/// Returns a human-readable status string for the Rhai caller.
+fn send_notification_impl(app_handle: Option<&AppHandle>, title: &str, body: &str) -> String {
+    match app_handle {
+        Some(handle) => {
+            use tauri_plugin_notification::NotificationExt;
+            match handle
+                .notification()
+                .builder()
+                .title(title)
+                .body(body)
+                .show()
+            {
+                Ok(()) => {
+                    tracing::info!("Notification sent - title: '{}', body: '{}'", title, body);
+                    format!("Notification sent: '{}' - '{}'", title, body)
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to send notification: {}", e);
+                    format!("Notification failed: {}", e)
+                }
+            }
+        }
+        None => {
+            // Fallback for tests and contexts without AppHandle
+            tracing::info!(
+                "Notification requested (no AppHandle) - title: '{}', body: '{}'",
+                title,
+                body
+            );
+            format!("Notification logged: '{}' - '{}'", title, body)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -440,13 +483,13 @@ mod tests {
     #[test]
     fn test_create_engine_does_not_panic() {
         let workspace = PathBuf::from("/tmp/test_workspace");
-        let _engine = create_sandboxed_engine(workspace);
+        let _engine = create_sandboxed_engine(workspace, None, None);
     }
 
     #[test]
     fn test_max_operations_limit() {
         let workspace = PathBuf::from("/tmp/test_workspace");
-        let engine = create_sandboxed_engine(workspace);
+        let engine = create_sandboxed_engine(workspace, None, None);
 
         // An infinite loop should be stopped by max_operations
         let result = engine.eval::<()>("loop { }");
@@ -581,15 +624,15 @@ mod tests {
     }
 
     #[test]
-    fn test_send_notification() {
-        let result = safe_send_notification("Test".to_string(), "Body".to_string());
-        assert!(result.contains("Notification queued"));
+    fn test_send_notification_without_app_handle() {
+        let result = send_notification_impl(None, "Test", "Body");
+        assert!(result.contains("Notification logged"));
     }
 
     #[test]
     fn test_engine_basic_script() {
         let workspace = PathBuf::from("/tmp/test_workspace");
-        let engine = create_sandboxed_engine(workspace);
+        let engine = create_sandboxed_engine(workspace, None, None);
 
         let result: i64 = engine.eval("let x = 40; x + 2").unwrap();
         assert_eq!(result, 42);
@@ -598,7 +641,7 @@ mod tests {
     #[test]
     fn test_engine_json_in_script() {
         let workspace = PathBuf::from("/tmp/test_workspace");
-        let engine = create_sandboxed_engine(workspace);
+        let engine = create_sandboxed_engine(workspace, None, None);
 
         let result: String = engine
             .eval(r#"let data = json_parse("{\"key\": \"value\"}"); json_stringify(data)"#)
@@ -610,7 +653,7 @@ mod tests {
     #[test]
     fn test_engine_regex_in_script() {
         let workspace = PathBuf::from("/tmp/test_workspace");
-        let engine = create_sandboxed_engine(workspace);
+        let engine = create_sandboxed_engine(workspace, None, None);
 
         let result: rhai::Array = engine
             .eval(r#"regex_match("Price: $42", "\\$\\d+")"#)
@@ -621,7 +664,7 @@ mod tests {
     #[test]
     fn test_engine_base64_in_script() {
         let workspace = PathBuf::from("/tmp/test_workspace");
-        let engine = create_sandboxed_engine(workspace);
+        let engine = create_sandboxed_engine(workspace, None, None);
 
         let result: String = engine
             .eval(r#"let enc = base64_encode("hello"); base64_decode(enc)"#)
@@ -632,7 +675,7 @@ mod tests {
     #[test]
     fn test_engine_datetime_in_script() {
         let workspace = PathBuf::from("/tmp/test_workspace");
-        let engine = create_sandboxed_engine(workspace);
+        let engine = create_sandboxed_engine(workspace, None, None);
 
         let result: String = engine.eval("get_current_datetime()").unwrap();
         assert!(result.contains('T'));

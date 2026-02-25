@@ -11,6 +11,7 @@ use sqlx::{Pool, Row, Sqlite};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tauri::AppHandle;
 
 use super::rhai_engine::create_sandboxed_engine;
 
@@ -118,8 +119,16 @@ pub struct RhaiToolRegistry {
 
 impl RhaiToolRegistry {
     /// Create a new registry backed by the given database and workspace path.
-    pub fn new(db: Pool<Sqlite>, workspace: PathBuf) -> Self {
-        let engine = create_sandboxed_engine(workspace);
+    ///
+    /// When `app_handle` and `instance_name` are provided, the Rhai
+    /// `send_notification` function will send real native OS notifications.
+    pub fn new(
+        db: Pool<Sqlite>,
+        workspace: PathBuf,
+        app_handle: Option<AppHandle>,
+        instance_name: Option<String>,
+    ) -> Self {
+        let engine = create_sandboxed_engine(workspace, app_handle, instance_name);
         Self {
             engine,
             compiled_cache: HashMap::new(),
@@ -520,7 +529,7 @@ mod tests {
     #[tokio::test]
     async fn test_register_tool() {
         let db = test_db().await;
-        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"));
+        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"), None, None);
 
         let tool = registry
             .register_tool(
@@ -540,7 +549,7 @@ mod tests {
     #[tokio::test]
     async fn test_register_invalid_script() {
         let db = test_db().await;
-        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"));
+        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"), None, None);
 
         let result = registry
             .register_tool("bad", "A broken tool", "let x = ;; invalid", vec![])
@@ -552,7 +561,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_execute_tool() {
         let db = test_db().await;
-        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"));
+        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"), None, None);
 
         registry
             .register_tool("add", "Adds two numbers", "40 + 2", vec![])
@@ -570,7 +579,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_execute_tool_with_params() {
         let db = test_db().await;
-        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"));
+        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"), None, None);
 
         let script = r#"
             let params = json_parse(params_json);
@@ -595,7 +604,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_nonexistent_tool() {
         let db = test_db().await;
-        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"));
+        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"), None, None);
 
         let result = registry
             .execute_tool("nonexistent", serde_json::json!({}))
@@ -607,7 +616,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_tools() {
         let db = test_db().await;
-        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"));
+        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"), None, None);
 
         registry
             .register_tool("tool_a", "First tool", "42", vec![])
@@ -625,7 +634,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_tool() {
         let db = test_db().await;
-        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"));
+        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"), None, None);
 
         registry
             .register_tool("my_tool", "A tool", "1 + 1", vec![])
@@ -643,7 +652,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_tool() {
         let db = test_db().await;
-        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"));
+        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"), None, None);
 
         registry
             .register_tool("to_delete", "Will be deleted", "0", vec![])
@@ -667,7 +676,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_deprecated_tool() {
         let db = test_db().await;
-        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"));
+        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"), None, None);
 
         registry
             .register_tool("old_tool", "Deprecated", "0", vec![])
@@ -687,7 +696,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_usage_stats_updated() {
         let db = test_db().await;
-        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"));
+        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"), None, None);
 
         registry
             .register_tool("counter", "Counting tool", "42", vec![])
@@ -713,7 +722,7 @@ mod tests {
     #[tokio::test]
     async fn test_tool_summary() {
         let db = test_db().await;
-        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"));
+        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"), None, None);
 
         registry
             .register_tool("alpha", "First tool", "1", vec![])
@@ -733,7 +742,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_clear_cache() {
         let db = test_db().await;
-        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"));
+        let mut registry = RhaiToolRegistry::new(db, PathBuf::from("/tmp"), None, None);
 
         registry
             .register_tool("cached", "Cached tool", "42", vec![])

@@ -160,7 +160,7 @@ mod tests {
             .await
             .expect("Failed to create tables");
 
-        let mut registry = RhaiToolRegistry::new(pool, PathBuf::from("/tmp"));
+        let mut registry = RhaiToolRegistry::new(pool, PathBuf::from("/tmp"), None, None);
 
         // Register a test tool
         registry
