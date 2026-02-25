@@ -1,5 +1,7 @@
 use anyhow::Result;
 
+use crate::tools::planning::SharedTodoList;
+
 use super::{SessionSummary, SharedLongTermMemory, SummarizationAgent, WorkingMemory};
 
 /// Context builder combines all memory layers into a coherent context
@@ -7,6 +9,7 @@ pub struct ContextBuilder {
     working_memory: WorkingMemory,
     long_term_memory: SharedLongTermMemory,
     summarization_agent: SummarizationAgent,
+    todo_list: Option<SharedTodoList>,
 }
 
 impl ContextBuilder {
@@ -20,12 +23,28 @@ impl ContextBuilder {
             working_memory,
             long_term_memory,
             summarization_agent,
+            todo_list: None,
         }
+    }
+
+    /// Set the shared TODO list for context injection
+    pub fn set_todo_list(&mut self, todo_list: SharedTodoList) {
+        self.todo_list = Some(todo_list);
     }
 
     /// Build complete context for a user query
     pub async fn build_context(&self, user_query: &str) -> Result<String> {
         let mut context_parts = Vec::new();
+
+        // 0. Active TODO list (if any)
+        if let Some(ref todo_list) = self.todo_list {
+            let list_guard = todo_list.read().await;
+            if let Some(ref list) = *list_guard {
+                context_parts.push("## Active TODO List:\n".to_string());
+                context_parts.push(list.to_markdown());
+                context_parts.push("\n".to_string());
+            }
+        }
 
         // 1. Long-term memories (semantically relevant)
         let memories = {

@@ -87,6 +87,59 @@ pub fn create_shared_todo_list() -> SharedTodoList {
 pub struct PlanningError(String);
 
 // ---------------------------------------------------------------------------
+// ReadTodos Tool
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ReadTodosTool {
+    #[serde(skip)]
+    current_list: Option<SharedTodoList>,
+}
+
+impl ReadTodosTool {
+    pub fn new(shared_list: SharedTodoList) -> Self {
+        Self {
+            current_list: Some(shared_list),
+        }
+    }
+}
+
+impl Tool for ReadTodosTool {
+    const NAME: &'static str = "read_todos";
+    type Error = PlanningError;
+    type Args = serde_json::Value;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "read_todos".to_string(),
+            description: "Read the current TODO list. Returns the full list with all items \
+                and their statuses, or a message if no TODO list exists yet."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        }
+    }
+
+    async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
+        let shared = self
+            .current_list
+            .as_ref()
+            .ok_or_else(|| PlanningError("TODO list not initialized".to_string()))?;
+
+        let list_guard = shared.read().await;
+
+        match list_guard.as_ref() {
+            Some(list) => Ok(list.to_markdown()),
+            None => Ok("No TODO list exists yet. Use write_todos to create one.".to_string()),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // WriteTodos Tool
 // ---------------------------------------------------------------------------
 
@@ -273,5 +326,46 @@ mod tests {
         assert_eq!(format!("{}", TodoStatus::InProgress), "[~]");
         assert_eq!(format!("{}", TodoStatus::Blocked), "[!]");
         assert_eq!(format!("{}", TodoStatus::Cancelled), "[-]");
+    }
+
+    #[tokio::test]
+    async fn test_read_todos_empty() {
+        let shared = create_shared_todo_list();
+        let tool = ReadTodosTool::new(shared);
+        let result = Tool::call(&tool, serde_json::json!({})).await.unwrap();
+        assert!(result.contains("No TODO list exists yet"));
+    }
+
+    #[tokio::test]
+    async fn test_read_todos_with_items() {
+        let shared = create_shared_todo_list();
+
+        // Populate via WriteTodosTool
+        let write_tool = WriteTodosTool::new(shared.clone());
+        let args = WriteTodosArgs {
+            context: "Test project".to_string(),
+            todos: vec![NewTodoItem {
+                description: "Step one".to_string(),
+                priority: 5,
+            }],
+            updates: vec![],
+        };
+        Tool::call(&write_tool, args).await.unwrap();
+
+        // Read via ReadTodosTool
+        let read_tool = ReadTodosTool::new(shared);
+        let result = Tool::call(&read_tool, serde_json::json!({})).await.unwrap();
+        assert!(result.contains("Test project"));
+        assert!(result.contains("Step one"));
+        assert!(result.contains("[P5]"));
+    }
+
+    #[tokio::test]
+    async fn test_read_todos_definition() {
+        let shared = create_shared_todo_list();
+        let tool = ReadTodosTool::new(shared);
+        let def = Tool::definition(&tool, "test".to_string()).await;
+        assert_eq!(def.name, "read_todos");
+        assert!(def.description.contains("current TODO list"));
     }
 }

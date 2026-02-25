@@ -23,7 +23,7 @@ use crate::memory::SharedLongTermMemory;
 use crate::tools::code_generation::{CreateToolTool, ReadToolTool, UpdateToolTool};
 use crate::tools::filesystem::{EditFileTool, GrepTool, LsTool, ReadFileTool, WriteFileTool};
 use crate::tools::memory_tools::{AddMemoryTool, DeleteMemoryTool, SearchMemoryTool};
-use crate::tools::planning::{self, WriteTodosTool};
+use crate::tools::planning::{self, ReadTodosTool, WriteTodosTool};
 use crate::tools::rhai_bridge_tool::{RhaiExecuteTool, SharedRegistry};
 use crate::utils::paths;
 
@@ -78,7 +78,8 @@ pub fn build_sub_agent_tools(
         Box::new(WriteFileTool::new(workspace.clone())),
         Box::new(EditFileTool::new(workspace.clone())),
         Box::new(GrepTool::new(workspace.clone())),
-        // Planning tool
+        // Planning tools
+        Box::new(ReadTodosTool::new(todo_list.clone())),
         Box::new(WriteTodosTool::new(todo_list)),
         // Dynamic Rhai tool executor
         Box::new(RhaiExecuteTool::new(
@@ -148,7 +149,10 @@ Use the workspace to:
 - Offload large information from context
 
 ### Planning
+- **read_todos**: Read the current TODO list (all items with their statuses)
 - **write_todos**: Create/update a TODO list for multi-step tasks
+
+The active TODO list is automatically included in your context when it exists, so you always know your current plan. Use read_todos if you need to explicitly inspect the list.
 
 Use write_todos when:
 - A task requires more than 2-3 steps
@@ -655,6 +659,7 @@ mod tests {
         assert!(prompt.contains("grep"));
         // Planning
         assert!(prompt.contains("### Planning"));
+        assert!(prompt.contains("read_todos"));
         assert!(prompt.contains("write_todos"));
         // Dynamic tools
         assert!(prompt.contains("execute_dynamic_tool"));

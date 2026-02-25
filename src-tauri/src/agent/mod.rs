@@ -29,7 +29,7 @@ use crate::scheduler::{
 use crate::tools::code_generation::{CreateToolTool, ReadToolTool, UpdateToolTool};
 use crate::tools::filesystem::{EditFileTool, GrepTool, LsTool, ReadFileTool, WriteFileTool};
 use crate::tools::memory_tools::{AddMemoryTool, DeleteMemoryTool, SearchMemoryTool};
-use crate::tools::planning::{self, SharedTodoList, WriteTodosTool};
+use crate::tools::planning::{self, ReadTodosTool, SharedTodoList, WriteTodosTool};
 use crate::tools::registry::RhaiToolRegistry;
 use crate::tools::rhai_bridge_tool::{RhaiExecuteTool, SharedRegistry};
 use crate::tools::subagents::{base_tools_prompt, ClientProvider, DelegateTaskTool};
@@ -92,7 +92,8 @@ fn create_tools(
         Box::new(WriteFileTool::new(workspace.clone())),
         Box::new(EditFileTool::new(workspace.clone())),
         Box::new(GrepTool::new(workspace.clone())),
-        // Planning tool
+        // Planning tools
+        Box::new(ReadTodosTool::new(todo_list.clone())),
         Box::new(WriteTodosTool::new(todo_list)),
         // Dynamic Rhai tool executor
         Box::new(RhaiExecuteTool::new(
@@ -260,14 +261,15 @@ impl OwnAIAgent {
             working_memory.load_from_messages(recent_messages);
         }
 
-        let context_builder = ContextBuilder::new(
+        let mut context_builder = ContextBuilder::new(
             working_memory,
             shared_long_term_memory.clone(),
             summarization_agent,
         );
 
-        // Create shared TODO list state
+        // Create shared TODO list state and register with context builder
         let todo_list = planning::create_shared_todo_list();
+        context_builder.set_todo_list(todo_list.clone());
 
         // Load API key from keychain if needed
         let api_key = if instance.provider.needs_api_key() {
