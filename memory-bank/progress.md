@@ -5,7 +5,7 @@
 **Phase 1 (Foundation)**: Complete
 **Phase 2 (Memory System)**: Complete
 **Phase 3 (Self-Programming / Rhai)**: Complete
-**Phase 4 (Deep Agent Features)**: Steps 12-16 complete (Canvas Backend + Protocol + Frontend + Bridge API + Sub-Agent System), next: Step 17 (Scheduled Tasks)
+**Phase 4 (Deep Agent Features)**: Complete (all 7 steps: Canvas Backend + Protocol + Frontend + Bridge API + Sub-Agent System + Scheduled Tasks + Dynamic System Prompt)
 **Phase 5-7 (Polish, Testing, Release)**: Not started
 
 ## What Works
@@ -37,14 +37,14 @@
 - [x] Per-instance databases at `~/.ownai/instances/{id}/ownai.db`
 - [x] API key storage via OS keychain (keyring crate)
 - [x] AgentCache for lazy agent initialization per instance
-- [x] 28 Tauri commands registered and functional
+- [x] 31 Tauri commands registered and functional
 - [x] Working Memory with VecDeque and token budget (50000 tokens default, 30% eviction)
 - [x] Summarization via LLM Extractor (rig Extractor with SummaryResponse JsonSchema struct)
 - [x] Long-term Memory with fastembed (local Qwen3-Embedding-0.6B embeddings)
 - [x] Context Builder (assembles context from all memory tiers)
 - [x] Filesystem Tools (ls, read_file, write_file, edit_file, grep) with tests
 - [x] Planning Tool (write_todos with SharedTodoList) with tests
-- [x] Tools registered with agent via create_tools() helper (21 tools total for main agent, 20 for sub-agents)
+- [x] Tools registered with agent via create_tools() helper (24 tools total for main agent, 20 for sub-agents)
 - [x] process_stream! macro for uniform streaming across providers
 - [x] Path utilities for cross-platform file management
 - [x] Workspace directory per instance at `~/.ownai/instances/{id}/workspace/`
@@ -70,20 +70,14 @@
 - [x] Memory Tools (search_memory, add_memory, delete_memory as rig Tools for all agents)
 - [x] SharedLongTermMemory (Arc<Mutex<LongTermMemory>>) for concurrent tool access
 - [x] System prompt refactored to use base_tools_prompt() (no duplication)
+- [x] Scheduled Tasks (tokio-cron-scheduler, cron validation via croner, SharedScheduler as Tauri state)
+- [x] 3 scheduler rig Tools (create_scheduled_task, list_scheduled_tasks, delete_scheduled_task)
+- [x] 3 scheduler Tauri commands (list_scheduled_tasks, delete_scheduled_task, toggle_scheduled_task)
+- [x] Task execution via temporary agents with build_sub_agent_tools()
+- [x] Tasks loaded and registered for all instances on app startup
+- [x] Dynamic system prompt (all capabilities documented via base_tools_prompt())
 
 ## What's Left to Build
-
-### Phase 4 - Deep Agent Features
-- [x] **Sub-Agent System**: DelegateTaskTool for dynamic sub-agent creation
-  - [x] Dynamic sub-agents (main agent creates on the fly with custom system prompts)
-  - [x] All tools available to sub-agents (except delegate_task to prevent recursion)
-  - [x] Memory tools (search_memory, add_memory, delete_memory) for all agents
-  - [x] base_tools_prompt() for tool documentation
-- [ ] **Scheduled Tasks**: Cron-like system
-  - [ ] tokio-cron-scheduler integration
-  - [ ] Task creation/management via chat
-  - [ ] System notifications for task results
-- [ ] **Dynamic System Prompt**: Include available tools listing
 
 ### Phase 5 - UI/UX Refinement
 - [ ] Message list virtualization for performance (large conversation histories)

@@ -11,7 +11,7 @@ use rig::streaming::{StreamedAssistantContent, StreamingChat};
 use rig::tool::ToolDyn;
 use sqlx::{Pool, Row, Sqlite};
 use std::path::PathBuf;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::ai_instances::{AIInstance, APIKeyStorage, LLMProvider};
 use crate::canvas::tools::{
@@ -22,6 +22,9 @@ use crate::memory::{
     fact_extraction, working_memory::Message, ContextBuilder, FactExtractionResponse,
     LongTermMemory, SessionSummary, SharedLongTermMemory, SummarizationAgent, SummaryResponse,
     WorkingMemory,
+};
+use crate::scheduler::{
+    CreateScheduledTaskTool, DeleteScheduledTaskTool, ListScheduledTasksTool, SharedScheduler,
 };
 use crate::tools::code_generation::{CreateToolTool, ReadToolTool, UpdateToolTool};
 use crate::tools::filesystem::{EditFileTool, GrepTool, LsTool, ReadFileTool, WriteFileTool};
@@ -82,7 +85,7 @@ fn create_tools(
     let workspace =
         paths::get_instance_workspace_path(instance_id).unwrap_or_else(|_| PathBuf::from("."));
 
-    let tools: Vec<Box<dyn ToolDyn>> = vec![
+    let mut tools: Vec<Box<dyn ToolDyn>> = vec![
         // Filesystem tools
         Box::new(LsTool::new(workspace.clone())),
         Box::new(ReadFileTool::new(workspace.clone())),
@@ -137,12 +140,36 @@ fn create_tools(
             model,
             instance_id.to_string(),
             registry,
-            db,
+            db.clone(),
             programs_root,
             long_term_memory,
-            app_handle,
+            app_handle.clone(),
         )),
     ];
+
+    // Scheduled task tools (only available when scheduler is initialized)
+    if let Some(ref handle) = app_handle {
+        if let Some(scheduler_state) = handle.try_state::<SharedScheduler>() {
+            let scheduler = scheduler_state.inner().clone();
+            if let Some(manager_state) =
+                handle.try_state::<std::sync::Arc<tokio::sync::Mutex<crate::ai_instances::AIInstanceManager>>>()
+            {
+                let manager = manager_state.inner().clone();
+                tools.push(Box::new(CreateScheduledTaskTool::new(
+                    db.clone(),
+                    instance_id.to_string(),
+                    scheduler.clone(),
+                    manager,
+                    app_handle.clone(),
+                )));
+                tools.push(Box::new(ListScheduledTasksTool::new(
+                    db.clone(),
+                    instance_id.to_string(),
+                )));
+                tools.push(Box::new(DeleteScheduledTaskTool::new(db, scheduler)));
+            }
+        }
+    }
 
     tools
 }

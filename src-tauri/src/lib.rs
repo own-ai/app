@@ -5,6 +5,7 @@ pub mod canvas;
 pub mod commands;
 pub mod database;
 pub mod memory;
+pub mod scheduler;
 pub mod tools;
 pub mod utils;
 
@@ -84,12 +85,64 @@ pub fn run() {
             // Initialize AI Instance Manager
             let manager = ai_instances::AIInstanceManager::new()
                 .expect("Failed to initialize AI Instance Manager");
-
-            app.manage(Arc::new(Mutex::new(manager)));
+            let shared_manager = Arc::new(Mutex::new(manager));
+            app.manage(shared_manager.clone());
 
             // Initialize Agent Cache
             let agent_cache: commands::chat::AgentCache = Arc::new(Mutex::new(HashMap::new()));
             app.manage(agent_cache);
+
+            // Initialize Scheduler
+            let app_handle = app.handle().clone();
+            let manager_for_scheduler = shared_manager.clone();
+            tauri::async_runtime::spawn(async move {
+                match scheduler::Scheduler::new().await {
+                    Ok(sched) => {
+                        let shared_scheduler: scheduler::SharedScheduler =
+                            Arc::new(Mutex::new(sched));
+
+                        // Load and register tasks for all instances
+                        {
+                            let mgr = manager_for_scheduler.lock().await;
+                            let instance_ids: Vec<String> =
+                                mgr.list_instances().iter().map(|i| i.id.clone()).collect();
+                            drop(mgr);
+
+                            for instance_id in instance_ids {
+                                if let Ok(db) = database::init_database(&instance_id).await {
+                                    if let Err(e) =
+                                        scheduler::runner::load_and_register_instance_tasks(
+                                            &shared_scheduler,
+                                            &instance_id,
+                                            &db,
+                                            manager_for_scheduler.clone(),
+                                            app_handle.clone(),
+                                        )
+                                        .await
+                                    {
+                                        tracing::warn!(
+                                            "Failed to load scheduled tasks for instance '{}': {}",
+                                            instance_id,
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                        }
+
+                        // Start the scheduler
+                        if let Err(e) = shared_scheduler.lock().await.start().await {
+                            tracing::error!("Failed to start scheduler: {}", e);
+                        }
+
+                        // Manage as Tauri state
+                        app_handle.manage(shared_scheduler);
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to create scheduler: {}", e);
+                    }
+                }
+            });
 
             Ok(())
         })
@@ -128,6 +181,10 @@ pub fn run() {
             commands::canvas::bridge_request,
             // Workspace
             commands::workspace::open_workspace,
+            // Scheduled Tasks
+            commands::scheduler::list_scheduled_tasks,
+            commands::scheduler::delete_scheduled_task,
+            commands::scheduler::toggle_scheduled_task,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

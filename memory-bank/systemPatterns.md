@@ -109,7 +109,8 @@ OwnAIAgent
 │   ├── Self-Programming: create_tool, read_tool, update_tool
 │   ├── Canvas: create_program, list_programs, open_program, program_ls, program_read_file, program_write_file, program_edit_file
 │   ├── Memory: search_memory, add_memory, delete_memory
-│   └── Delegation: delegate_task (main agent only, excluded from sub-agents)
+│   ├── Delegation: delegate_task (main agent only, excluded from sub-agents)
+│   └── Scheduler: create_scheduled_task, list_scheduled_tasks, delete_scheduled_task
 ├── working_memory (VecDeque<Message>)
 ├── summarization (SummarizationAgent)
 ├── long_term_memory (SharedLongTermMemory = Arc<Mutex<LongTermMemory>>)
@@ -144,7 +145,7 @@ OwnAIAgent
 - `commands/memory.rs` clones the Arc, drops AgentCache lock, then locks memory
 
 #### Command Pattern (Tauri)
-- 28 registered commands grouped by domain:
+- 31 registered commands grouped by domain:
   - **Instances**: create, list, delete, set_active, get_active
   - **Providers**: get_providers
   - **API Keys**: save_api_key, has_api_key, delete_api_key
@@ -152,6 +153,7 @@ OwnAIAgent
   - **Memory**: get_memory_stats, search_memory, add_memory_entry, delete_memory_entry
   - **Dynamic Tools**: list_dynamic_tools, create_dynamic_tool, update_dynamic_tool, delete_dynamic_tool, execute_dynamic_tool
   - **Canvas Programs**: list_programs, delete_program, get_program_url
+  - **Scheduler**: list_scheduled_tasks, delete_scheduled_task, toggle_scheduled_task
 - All commands are async, return `Result<T, String>`
 - State accessed via `tauri::State<Arc<Mutex<T>>>`
 
@@ -271,6 +273,19 @@ CREATE TABLE programs (
     UNIQUE(instance_id, name)
 );
 CREATE INDEX idx_programs_instance ON programs(instance_id);
+
+CREATE TABLE scheduled_tasks (
+    id TEXT PRIMARY KEY,
+    instance_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    cron_expression TEXT NOT NULL,
+    task_prompt TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_run DATETIME,
+    last_result TEXT,
+    created_at DATETIME NOT NULL
+);
+CREATE INDEX idx_scheduled_tasks_instance ON scheduled_tasks(instance_id);
 ```
 
 ## Implemented: Self-Programming Level 1 (Rhai Tools)
@@ -319,8 +334,16 @@ The agent can create and manage interactive HTML/CSS/JS applications:
 - **ClientProvider**: Enum wrapping Anthropic/OpenAI/Ollama clients, passed to DelegateTaskTool
 - **base_tools_prompt()**: Prompt for tool documentation, used by main + sub-agents
 
-### Deep Agent System (Remaining)
-- **Scheduled Tasks**: tokio-cron-scheduler for recurring actions
+### Implemented: Scheduled Tasks System
+- **Scheduler Module** (`scheduler/`): 4-file structure - mod.rs (Scheduler, SharedScheduler, ScheduledTask, validate_cron_expression), storage.rs (DB CRUD), runner.rs (task execution via temporary agents), tools.rs (3 rig Tools)
+- **SharedScheduler**: `Arc<Mutex<Scheduler>>` managed as Tauri state, wraps tokio-cron-scheduler JobScheduler
+- **Cron Validation**: croner v3.0.1 via `FromStr` trait (`expr.parse::<croner::Cron>()`)
+- **Task Execution**: Temporary agents created per task firing, using `build_sub_agent_tools()` (same tools as sub-agents)
+- **3 Scheduler rig Tools**: create_scheduled_task, list_scheduled_tasks, delete_scheduled_task -- added via `app_handle.try_state::<SharedScheduler>()`
+- **3 Scheduler Tauri Commands**: list_scheduled_tasks, delete_scheduled_task, toggle_scheduled_task
+- **Startup Loading**: All enabled tasks for all instances loaded and registered on app startup
+- **Events**: `scheduler:task_completed` and `scheduler:task_failed` emitted to frontend
+- **DB Table**: `scheduled_tasks` (id, instance_id, name, cron_expression, task_prompt, enabled, last_run, last_result, created_at)
 
 ### Bridge API (for Canvas Programs)
 ```typescript

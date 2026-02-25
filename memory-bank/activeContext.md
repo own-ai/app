@@ -2,7 +2,7 @@
 
 ## Current Work Focus
 
-The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**, **Phase 3 (Self-Programming)**, and **Steps 12-16 of Phase 4 (Canvas System + Bridge API + Sub-Agent System)**. The next work is **Phase 4, Step 17 (Scheduled Tasks)**.
+The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**, **Phase 3 (Self-Programming)**, and **Phase 4 (Deep Agent Features)** in its entirety. All 18 implementation steps are complete. The next work is **Phase 5 (UI/UX Refinement)** -- a new implementation plan needs to be created.
 
 ## What Has Been Built
 
@@ -24,7 +24,7 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 - OwnAIAgent with rig-core 0.30 integration (Anthropic, OpenAI, Ollama providers)
 - Multi-turn tool calling support (up to 50 turns)
 - Streaming chat via Tauri events (`agent:token`) with multi-turn stream processing
-- SQLite database with schema (messages, user_profile, tools, tool_executions, programs, program_data; summaries and memory_entries created dynamically)
+- SQLite database with schema (messages, user_profile, tools, tool_executions, programs, program_data, scheduled_tasks; summaries and memory_entries created dynamically)
 - AI Instance Manager with per-instance databases at `~/.ownai/instances/{id}/`
 - API key storage via OS keychain (keyring crate)
 - Working Memory (VecDeque with configurable token budget, default 50000 tokens, 30% eviction)
@@ -46,72 +46,67 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
   - Per-program key-value storage in `program_data` DB table
   - readFile/writeFile scoped to workspace directory (not program directory)
   - `bridge_request` Tauri command dispatches to bridge handlers
-- **Comprehensive System Prompt**: Includes self-programming instructions, Rhai language reference, Canvas programs section with Bridge API documentation, tool iteration workflow
+- **Sub-Agent System**: Dynamic sub-agents via DelegateTaskTool with custom system prompts
+  - Sub-agents get ALL tools except delegate_task (prevents recursion)
+  - Memory tools (search_memory, add_memory, delete_memory) for all agents
+  - base_tools_prompt() for tool documentation
+  - ClientProvider enum wrapping Anthropic/OpenAI/Ollama clients
+- **Scheduled Tasks System**: Cron-based recurring task execution
+  - tokio-cron-scheduler with croner for cron expression validation
+  - SharedScheduler as Tauri state, initialized on startup
+  - Tasks loaded and registered for all instances on app launch
+  - Temporary agents created for each task execution (same tools as sub-agents)
+  - 3 scheduler rig Tools: create_scheduled_task, list_scheduled_tasks, delete_scheduled_task
+  - 3 scheduler Tauri commands: list_scheduled_tasks, delete_scheduled_task, toggle_scheduled_task
+  - Events emitted to frontend on task completion/failure
+- **Dynamic System Prompt**: Fully dynamic, assembled from base_tools_prompt() + identity + delegation + scheduling
+- **Comprehensive System Prompt**: Includes self-programming instructions, Rhai language reference, Canvas programs section with Bridge API documentation, tool iteration workflow, scheduled tasks documentation
 - **Tool Commands**: 5 Tauri commands for dynamic tool management (list, create, update, delete, execute) via AgentCache
-- 28 registered Tauri commands (instances CRUD, providers, API keys, chat, memory stats, memory CRUD, dynamic tools, canvas programs, bridge)
+- 31 registered Tauri commands (instances CRUD, providers, API keys, chat, memory stats, memory CRUD, dynamic tools, canvas programs, bridge, scheduler)
 - AgentCache for multi-instance agent management
 - Workspace directory per instance at `~/.ownai/instances/{id}/workspace/`
 - Programs directory per instance at `~/.ownai/instances/{id}/programs/`
 
 ## Recent Changes
 
-- **Step 16 (Sub-Agent System) COMPLETED**:
-  - Created `src-tauri/src/tools/subagents.rs` with dynamic sub-agent system:
-    - `ClientProvider` enum wrapping Anthropic/OpenAI/Ollama rig clients
-    - `DelegateTaskTool` (name="delegate_task") - main agent creates sub-agents on the fly
-    - `base_tools_prompt()` - prompt for tool documentation
-    - `build_sub_agent_tools()` - gives sub-agents ALL tools except delegate_task
-    - 5 unit tests
-  - Created `src-tauri/src/tools/memory_tools.rs` with 3 rig Tools:
-    - `SearchMemoryTool` (name="search_memory") - semantic search via SharedLongTermMemory
-    - `AddMemoryTool` (name="add_memory") - stores entries in long-term memory
-    - `DeleteMemoryTool` (name="delete_memory") - deletes memory entries by ID
-    - 9 unit tests
-  - Refactored `SharedLongTermMemory = Arc<Mutex<LongTermMemory>>` in `memory/long_term.rs`
-  - Updated `memory/context_builder.rs` to use SharedLongTermMemory
-  - Refactored `agent/mod.rs`:
-    - `create_tools()` now takes 10 args (added SharedLongTermMemory, ClientProvider, model)
-    - All 3 provider match arms updated (Anthropic/OpenAI/Ollama)
-    - `extract_and_store_facts()` uses shared lock pattern
-    - `system_prompt()` uses `base_tools_prompt()` (no more tool doc duplication)
-  - Updated `commands/memory.rs` to use SharedLongTermMemory with proper lock management
-  - 21 tools for main agent, 20 for sub-agents (all except delegate_task)
-  - All 154 tests pass, cargo clippy clean, cargo fmt clean
+- **Step 17 (Scheduled Tasks) COMPLETED**:
+  - Created `src-tauri/src/scheduler/` module with 4-file structure:
+    - `mod.rs`: Scheduler struct wrapping tokio-cron-scheduler JobScheduler, SharedScheduler type alias, ScheduledTask struct, validate_cron_expression using croner v3 FromStr API, 5 tests
+    - `storage.rs`: DB CRUD (load_tasks, save_task, delete_task, update_task_last_run, set_task_enabled, get_task), 7 tests
+    - `runner.rs`: register_task_job (cron job registration with closure), execute_task (temporary agent creation), run_task_agent (provider-specific agent with explicit type annotations for Anthropic/OpenAI/Ollama), load_and_register_instance_tasks (startup loader)
+    - `tools.rs`: CreateScheduledTaskTool, ListScheduledTasksTool, DeleteScheduledTaskTool as rig Tools, 9 tests
+  - Added `scheduled_tasks` table to database schema
+  - Added `tokio-cron-scheduler` v0.15.1 and `croner` v3.0.1 to Cargo.toml
+  - Scheduler initialized as SharedScheduler in `lib.rs` async setup, tasks loaded for all instances
+  - 3 Tauri commands in `commands/scheduler.rs`: list_scheduled_tasks, delete_scheduled_task, toggle_scheduled_task
+  - 3 scheduler tools added to agent in `agent/mod.rs` via `app_handle.try_state::<SharedScheduler>()`
+  - System prompt updated with Scheduled Tasks section in `base_tools_prompt()`
+  - Frontend: ScheduledTask TypeScript interface, i18n translations (EN + DE)
+  - All 175 tests pass, cargo clippy clean, cargo fmt clean
 
-- **Step 15 (Bridge API) COMPLETED**:
-  - Created `src-tauri/src/canvas/bridge.rs` with full bridge module:
-    - `BridgeRequest` enum (Chat, StoreData, LoadData, Notify, ReadFile, WriteFile)
-    - `BridgeResponse` struct with ok(), ok_empty(), err() constructors
-    - `store_program_data()` / `load_program_data()` - DB CRUD for program_data table
-    - `handle_store_data()`, `handle_load_data()`, `handle_notify()` handlers
-    - `handle_read_file()` / `handle_write_file()` - workspace-scoped with path traversal prevention
-    - `resolve_workspace_path()` - same security pattern as filesystem tools
-    - `bridge_script()` - returns JavaScript `<script>` block with `window.ownai` API
-    - 20 unit tests covering all handlers, data isolation, path traversal prevention
-  - Updated `src-tauri/src/canvas/mod.rs` - added `pub mod bridge;`
-  - Updated `src-tauri/src/database/schema.rs` - added `program_data` table (program_name, key, value, updated_at)
-  - Updated `src-tauri/src/canvas/protocol.rs`:
-    - Added `inject_bridge_script()` function (inserts before `</head>`, or `</body>`, or prepends)
-    - Modified `load_program_file()` to inject bridge script for HTML files
-    - 4 new tests for injection scenarios
-  - Updated `src-tauri/src/commands/canvas.rs` - added `bridge_request` Tauri command
-  - Updated `src-tauri/src/lib.rs` - registered `bridge_request` command (28 total)
-  - Updated `src/components/canvas/CanvasPanel.tsx`:
-    - Added `iframeRef` for direct iframe communication
-    - Added `useEffect` with postMessage listener for `ownai-bridge-request` events
-    - Forwards requests to Tauri backend, sends `ownai-bridge-response` back to iframe
-  - Updated system prompt in `agent/mod.rs` with Bridge API section documenting all 6 methods with usage examples
-  - All checks pass: `cargo build`, `cargo test` (140 passed), `cargo clippy`, `cargo fmt`, `pnpm tsc --noEmit`, `pnpm lint`
+- **Step 18 (Dynamic System Prompt) COMPLETED**:
+  - System prompt is now fully dynamic, assembled from `base_tools_prompt()` which documents all tool categories
+  - Available Rhai tools dynamically listed from registry in system prompt
+  - All capabilities documented: filesystem, planning, self-programming, Canvas, Bridge API, memory, delegation, scheduling
 
 ## Next Steps
 
-### Near-term (Phase 4 - Deep Agent Features)
-- Step 17: Scheduled Tasks (tokio-cron-scheduler)
-- Step 18: Dynamic System Prompt (final integration with all capabilities)
+### Immediate
+- **Phase 4 is complete** -- all 18 implementation steps done
+- Request a new implementation plan for Phase 5-7 (UI/UX Refinement, Testing, Polish)
 
-### Later (Phase 5-7)
-- UI/UX refinement (message virtualization, onboarding, ToolCallIndicator, TodoList rendering)
-- Testing & stabilization
+### Phase 5 - UI/UX Refinement
+- Message list virtualization (react-virtual) for performance with large histories
+- Infinite scroll with lazy loading of older messages
+- Onboarding flow for first-time users
+- ToolCallIndicator component improvements
+- TodoList rendering in system messages
+- Program management UI improvements
+
+### Phase 6-7 - Testing, Polish, Release
+- Frontend tests (Vitest + React Testing Library)
+- Backend integration tests for Tauri commands
+- Error handling improvements
 - Build & packaging for release
 
 ## Active Decisions and Considerations
@@ -140,6 +135,9 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 - **Agent instructs to reuse programs**: System prompt tells agent to check `list_programs` first and use `open_program` for existing programs
 - **Bridge API**: postMessage-based communication, `window.ownai` injected into HTML, workspace-scoped file access (not program-scoped)
 - **Bridge Data Storage**: Per-program key-value storage in `program_data` table, isolated by program name
+- **Scheduler**: SharedScheduler as Tauri state, loaded on startup, scheduler tools added via `app_handle.try_state()`
+- **Scheduler Task Execution**: Temporary agents with `build_sub_agent_tools()` (same tools as sub-agents, no delegate_task)
+- **Cron Validation**: croner v3.0.1 with FromStr trait (`expr.parse::<croner::Cron>()`)
 
 ## Important Patterns and Preferences
 
@@ -154,3 +152,5 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 - Canvas tools use `#[serde(skip)]` pattern for non-serializable fields (Pool, PathBuf)
 - Canvas store uses `useCanvasStore.getState()` for reading state outside React components (in checkForNewPrograms callback)
 - Bridge script injection: before `</head>`, fallback to `</body>`, fallback to prepend
+- Scheduler tools use `app_handle.try_state()` for optional state retrieval (no signature changes needed)
+- Provider clients need explicit type annotations in runner.rs (`let client: anthropic::Client = ...`)

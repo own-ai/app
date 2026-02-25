@@ -80,6 +80,19 @@
     "program_list": "Programm auswählen",
     "toggle_canvas": "Programm umschalten"
   },
+  "scheduler": {
+    "title": "Geplante Aufgaben",
+    "no_tasks": "Keine geplanten Aufgaben. Bitte deine KI, eine zu erstellen.",
+    "enabled": "Aktiviert",
+    "disabled": "Deaktiviert",
+    "enable": "Aktivieren",
+    "disable": "Deaktivieren",
+    "delete_task": "Aufgabe löschen",
+    "confirm_delete": "Geplante Aufgabe \"{{name}}\" löschen? Das kann nicht rückgängig gemacht werden.",
+    "last_run": "Letzter Lauf",
+    "cron": "Zeitplan",
+    "never_run": "Noch nicht gelaufen"
+  },
   "errors": {
     "generic": "Etwas ist schiefgelaufen. Bitte versuche es erneut.",
     "network": "Netzwerkfehler. Bitte überprüfe deine Verbindung.",

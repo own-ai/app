@@ -57,7 +57,8 @@ const SUB_AGENT_MAX_TURNS: usize = 25;
 
 /// Build the full set of tools for a sub-agent.
 /// Sub-agents get all tools except `delegate_task` (to prevent recursion).
-fn build_sub_agent_tools(
+/// Also used by the scheduler runner for task execution agents.
+pub fn build_sub_agent_tools(
     instance_id: &str,
     registry: SharedRegistry,
     available_dynamic_tools: Vec<(String, String)>,
@@ -290,12 +291,39 @@ const data = await window.ownai.readFile("data.json");
 
 When creating programs that need persistence, use storeData/loadData. When programs need to interact with workspace files, use readFile/writeFile. The chat method is useful for AI-powered features within programs.
 
-### Best Practices
+### Best Practices (Canvas)
 - Use semantic, lowercase names with hyphens (e.g. "expense-tracker", "chess-board")
 - Start with a working index.html, then iterate
 - For complex apps, separate HTML, CSS, and JS into different files
 - The user can view the program in a Canvas iframe beside the chat
-- Use the Bridge API (window.ownai) for persistence, AI interaction, and file access"#.to_string()
+- Use the Bridge API (window.ownai) for persistence, AI interaction, and file access
+
+## Scheduled Tasks
+
+You can create recurring tasks that run automatically on a cron schedule.
+
+### Scheduler Tools
+- **create_scheduled_task**: Create a new recurring task with a cron expression and a prompt
+- **list_scheduled_tasks**: List all scheduled tasks for the current instance
+- **delete_scheduled_task**: Delete a scheduled task by ID
+
+### When to Use Scheduled Tasks
+- The user wants something to happen regularly (e.g. daily summaries, weekly reports)
+- A task should run autonomously without the user being present
+- Periodic checks or maintenance operations
+
+### How It Works
+1. Call `create_scheduled_task` with a name, cron expression, and task prompt
+2. Each time the schedule triggers, a temporary agent executes the prompt
+3. The temporary agent has access to all tools (filesystem, memory, canvas, etc.)
+4. Results are logged and can be viewed via `list_scheduled_tasks`
+
+### Cron Expression Examples
+- `0 8 * * *` -- every day at 8:00
+- `0 9 * * 1` -- every Monday at 9:00
+- `*/30 * * * *` -- every 30 minutes
+- `0 0 1 * *` -- first day of every month at midnight
+- `0 18 * * 1-5` -- weekdays at 18:00"#.to_string()
 }
 
 // ---------------------------------------------------------------------------

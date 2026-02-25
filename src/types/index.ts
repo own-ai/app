@@ -52,3 +52,16 @@ export interface Program {
 }
 
 export type CanvasViewMode = "chat" | "split" | "canvas";
+
+// Scheduled Task Types
+export interface ScheduledTask {
+  id: string;
+  instance_id: string;
+  name: string;
+  cron_expression: string;
+  task_prompt: string;
+  enabled: boolean;
+  last_run: string | null;
+  last_result: string | null;
+  created_at: string;
+}

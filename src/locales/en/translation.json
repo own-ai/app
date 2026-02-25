@@ -80,6 +80,19 @@
     "program_list": "Select a program",
     "toggle_canvas": "Toggle program view"
   },
+  "scheduler": {
+    "title": "Scheduled Tasks",
+    "no_tasks": "No scheduled tasks. Ask your AI to create one.",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "enable": "Enable",
+    "disable": "Disable",
+    "delete_task": "Delete task",
+    "confirm_delete": "Delete scheduled task \"{{name}}\"? This cannot be undone.",
+    "last_run": "Last run",
+    "cron": "Schedule",
+    "never_run": "Never run yet"
+  },
   "errors": {
     "generic": "Something went wrong. Please try again.",
     "network": "Network error. Please check your connection.",

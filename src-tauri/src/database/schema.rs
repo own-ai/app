@@ -147,6 +147,37 @@ pub async fn create_tables(pool: &Pool<Sqlite>) -> Result<()> {
     .await
     .context("Failed to create program_data table")?;
 
+    // Scheduled tasks table (cron-based recurring agent tasks)
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS scheduled_tasks (
+            id TEXT PRIMARY KEY,
+            instance_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            cron_expression TEXT NOT NULL,
+            task_prompt TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            last_run DATETIME,
+            last_result TEXT,
+            created_at DATETIME NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create scheduled_tasks table")?;
+
+    // Index for scheduled tasks by instance_id
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_instance_id
+        ON scheduled_tasks(instance_id)
+        "#,
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create scheduled_tasks index")?;
+
     tracing::debug!("Database tables created successfully");
 
     Ok(())

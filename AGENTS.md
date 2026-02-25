@@ -164,6 +164,7 @@ app/
 │   │   │   ├── chat.rs           # Chat message commands
 │   │   │   ├── instances.rs      # Instance management commands
 │   │   │   ├── memory.rs         # Memory system commands
+│   │   │   ├── scheduler.rs      # Scheduled task management commands
 │   │   │   └── tools.rs          # Dynamic tool management commands
 │   │   ├── database/             # Database layer
 │   │   │   ├── schema.rs         # Table definitions, migrations
@@ -175,6 +176,11 @@ app/
 │   │   │   ├── fact_extraction.rs # Automatic fact extraction from conversations
 │   │   │   ├── context_builder.rs # Assembles context for LLM
 │   │   │   └── mod.rs
+│   │   ├── scheduler/            # Scheduled tasks (cron-like)
+│   │   │   ├── mod.rs            # Core types, cron validation
+│   │   │   ├── storage.rs        # DB CRUD for scheduled tasks
+│   │   │   ├── runner.rs         # Job registration, task execution
+│   │   │   └── tools.rs          # LLM tools (create/list/delete tasks)
 │   │   ├── tools/                # Tool system
 │   │   │   ├── filesystem.rs     # ls, read, write, edit, grep tools
 │   │   │   ├── planning.rs       # TODO list management tool
@@ -332,6 +338,20 @@ CREATE TABLE tool_executions (
     input_params TEXT,
     output TEXT,
     FOREIGN KEY (tool_id) REFERENCES tools(id)
+);
+
+-- Scheduled tasks (cron-like recurring agent actions)
+CREATE TABLE scheduled_tasks (
+    id TEXT PRIMARY KEY,
+    instance_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    cron_expression TEXT NOT NULL,
+    task_prompt TEXT NOT NULL,    -- What the agent should do
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL,
+    last_run DATETIME,
+    FOREIGN KEY (instance_id) REFERENCES ai_instances(id)
 );
 ```
 
