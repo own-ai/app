@@ -6,6 +6,7 @@ use sqlx::{Pool, Row, Sqlite};
 use std::future::Future;
 use std::pin::Pin;
 
+use super::long_term::{LongTermMemory, MemoryEntry, MemoryType, SharedLongTermMemory};
 use super::working_memory::Message;
 
 /// Trait for LLM-based summary extraction, abstracting over providers.
@@ -49,25 +50,34 @@ pub struct SummaryResponse {
 
 /// Summarization agent that uses LLM to create concise summaries.
 /// Owns the summary extractor and handles all summarization logic
-/// including LLM extraction, database persistence, and message linking.
+/// including LLM extraction, database persistence, embedding generation,
+/// key fact storage in long-term memory, and semantic summary search.
 pub struct SummarizationAgent {
     db: Pool<Sqlite>,
     extractor: Option<Box<dyn SummaryExtractor>>,
+    long_term_memory: Option<SharedLongTermMemory>,
 }
 
 impl SummarizationAgent {
-    /// Create new summarization agent (without extractor).
+    /// Create new summarization agent (without extractor or long-term memory).
     /// Call `set_extractor` to enable LLM-based summarization.
+    /// Call `set_long_term_memory` to enable embedding generation and key fact storage.
     pub fn new(db: Pool<Sqlite>) -> Self {
         Self {
             db,
             extractor: None,
+            long_term_memory: None,
         }
     }
 
     /// Set the LLM summary extractor. Must be called before `summarize_and_save`.
     pub fn set_extractor(&mut self, extractor: Box<dyn SummaryExtractor>) {
         self.extractor = Some(extractor);
+    }
+
+    /// Set the shared long-term memory for embedding generation and key fact storage.
+    pub fn set_long_term_memory(&mut self, ltm: SharedLongTermMemory) {
+        self.long_term_memory = Some(ltm);
     }
 
     /// Initialize summaries table
@@ -99,6 +109,11 @@ impl SummarizationAgent {
             sqlx::query("ALTER TABLE messages ADD COLUMN summary_id TEXT REFERENCES summaries(id)")
                 .execute(&self.db)
                 .await;
+
+        // Add embedding column to summaries if not exists (migration for existing DBs)
+        let _ = sqlx::query("ALTER TABLE summaries ADD COLUMN embedding BLOB")
+            .execute(&self.db)
+            .await;
 
         // Create indices
         sqlx::query(
@@ -165,6 +180,60 @@ impl SummarizationAgent {
         let message_ids: Vec<String> = messages.iter().map(|m| m.id.clone()).collect();
         self.link_messages_to_summary(&message_ids, &summary.id)
             .await?;
+
+        // If long-term memory is available: compute embedding and store key facts
+        if let Some(ref ltm) = self.long_term_memory {
+            let mut mem = ltm.lock().await;
+
+            // Compute and store embedding for the summary
+            match mem.embed_text(&summary.summary_text) {
+                Ok(embedding) => {
+                    let embedding_bytes = LongTermMemory::vec_to_bytes(&embedding);
+                    if let Err(e) = sqlx::query("UPDATE summaries SET embedding = ? WHERE id = ?")
+                        .bind(&embedding_bytes)
+                        .bind(&summary.id)
+                        .execute(&self.db)
+                        .await
+                    {
+                        tracing::warn!("Failed to store summary embedding: {}", e);
+                    } else {
+                        tracing::info!("Stored embedding for summary {}", summary.id);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to compute summary embedding: {}", e);
+                }
+            }
+
+            // Store each key fact as a MemoryEntry in long-term memory
+            for fact in &summary.key_facts {
+                let entry = MemoryEntry {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    content: fact.clone(),
+                    entry_type: MemoryType::Fact,
+                    importance: 0.6,
+                    created_at: Utc::now(),
+                    last_accessed: Utc::now(),
+                    access_count: 0,
+                    tags: summary.topics.clone(),
+                    source_message_ids: vec![
+                        summary.start_message_id.clone(),
+                        summary.end_message_id.clone(),
+                    ],
+                };
+                if let Err(e) = mem.store(entry).await {
+                    tracing::warn!("Failed to store key fact as memory entry: {}", e);
+                }
+            }
+
+            if !summary.key_facts.is_empty() {
+                tracing::info!(
+                    "Stored {} key facts from summary {} as memory entries",
+                    summary.key_facts.len(),
+                    summary.id
+                );
+            }
+        }
 
         tracing::info!(
             "Saved LLM summary {} for {} messages (saved ~{} tokens)",
@@ -266,6 +335,66 @@ impl SummarizationAgent {
             .fetch_one(&self.db)
             .await?;
         Ok(count)
+    }
+
+    /// Search for summaries semantically similar to a query embedding.
+    /// Returns summaries sorted by cosine similarity (descending),
+    /// filtered by minimum similarity threshold.
+    pub async fn search_similar_summaries(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        min_similarity: f32,
+    ) -> Result<Vec<(f32, SessionSummary)>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, start_message_id, end_message_id, summary_text,
+                   key_facts, tools_mentioned, topics, timestamp, token_savings, embedding
+            FROM summaries
+            WHERE embedding IS NOT NULL
+            ORDER BY timestamp DESC
+            "#,
+        )
+        .fetch_all(&self.db)
+        .await?;
+
+        let mut scored: Vec<(f32, SessionSummary)> = rows
+            .into_iter()
+            .filter_map(|row| {
+                let embedding_bytes: Option<Vec<u8>> = row.get("embedding");
+                let embedding_bytes = embedding_bytes?;
+                if embedding_bytes.is_empty() {
+                    return None;
+                }
+
+                let embedding = LongTermMemory::bytes_to_vec(&embedding_bytes);
+                let similarity = LongTermMemory::cosine_similarity(query_embedding, &embedding);
+
+                if similarity < min_similarity {
+                    return None;
+                }
+
+                let summary = SessionSummary {
+                    id: row.get("id"),
+                    start_message_id: row.get("start_message_id"),
+                    end_message_id: row.get("end_message_id"),
+                    summary_text: row.get("summary_text"),
+                    key_facts: serde_json::from_str(row.get("key_facts")).ok()?,
+                    tools_mentioned: serde_json::from_str(row.get("tools_mentioned")).ok()?,
+                    topics: serde_json::from_str(row.get("topics")).ok()?,
+                    timestamp: row.get("timestamp"),
+                    token_savings: row.get::<i32, _>("token_savings") as usize,
+                };
+
+                Some((similarity, summary))
+            })
+            .collect();
+
+        // Sort by similarity descending
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(limit);
+
+        Ok(scored)
     }
 }
 

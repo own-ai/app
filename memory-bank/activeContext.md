@@ -69,6 +69,16 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 
 ## Recent Changes
 
+- **Memory System Enhancement (Post-Phase 4)**:
+  - **SummarizationAgent refactored**: Moved LLM summarization logic from scattered code in `agent/mod.rs` into clean `SummarizationAgent` with `SummaryExtractor` trait abstraction
+  - **Summary Embeddings**: Summaries now get an `embedding BLOB` column, computed automatically via fastembed when saved. Migration handled gracefully in `init_table()`
+  - **Key Facts -> MemoryEntry**: When a summary is created, each `key_fact` is automatically stored as a `MemoryEntry` (type: Fact, importance: 0.6) in long-term memory
+  - **Semantic Summary Search**: New `search_similar_summaries()` method on `SummarizationAgent` enables cosine-similarity-based retrieval of older summaries
+  - **Context Builder Enhanced**: Now includes 3 most recent summaries (with date) AND the most semantically relevant older summary (if similarity >= 0.6 and not already in recent 3), displayed as "Relevant Earlier Conversation" with date and relevance percentage
+  - **long_term.rs**: `cosine_similarity`, `vec_to_bytes`, `bytes_to_vec` made `pub(crate)`, new `embed_text()` method exposed for other memory components
+  - **agent/mod.rs**: Passes `SharedLongTermMemory` to `SummarizationAgent` via `set_long_term_memory()`
+  - All 179 tests pass, clippy clean
+
 - **Step 17 (Scheduled Tasks) COMPLETED**:
   - Created `src-tauri/src/scheduler/` module with 4-file structure:
     - `mod.rs`: Scheduler struct wrapping tokio-cron-scheduler JobScheduler, SharedScheduler type alias, ScheduledTask struct, validate_cron_expression using croner v3 FromStr API, 5 tests

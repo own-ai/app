@@ -453,10 +453,13 @@ impl OwnAIAgent {
             }
         };
 
-        // Set the summary extractor on the SummarizationAgent (owned by ContextBuilder)
+        // Set the summary extractor and long-term memory on the SummarizationAgent
         context_builder
             .summarization_agent_mut()
             .set_extractor(Box::new(summary_extractor));
+        context_builder
+            .summarization_agent_mut()
+            .set_long_term_memory(shared_long_term_memory.clone());
 
         Ok(OwnAIAgent {
             agent,

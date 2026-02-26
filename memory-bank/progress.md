@@ -77,6 +77,12 @@
 - [x] Task execution via temporary agents with build_sub_agent_tools()
 - [x] Tasks loaded and registered for all instances on app startup
 - [x] Dynamic system prompt (all capabilities documented via base_tools_prompt())
+- [x] SummarizationAgent with SummaryExtractor trait (clean architecture, owns summarization logic)
+- [x] Summary embeddings (embedding BLOB column, auto-computed via fastembed on save)
+- [x] Key facts from summaries auto-stored as MemoryEntry in long-term memory
+- [x] Semantic summary search (cosine similarity on summary embeddings)
+- [x] Context builder: 3 recent summaries + semantically relevant older summary (threshold 0.6)
+- [x] Summary dates shown in context ("[YYYY-MM-DD] summary text")
 
 ## What's Left to Build
 

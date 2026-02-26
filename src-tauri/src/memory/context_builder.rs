@@ -63,17 +63,64 @@ impl ContextBuilder {
             context_parts.push("\n".to_string());
         }
 
-        // 2. Recent summaries (if relevant)
+        // 2. Recent summaries (3 most recent by timestamp)
         let recent_summaries = self.get_recent_summaries(3).await?;
+        let recent_ids: Vec<String> = recent_summaries.iter().map(|s| s.id.clone()).collect();
+
         if !recent_summaries.is_empty() {
             context_parts.push("## Recent Session Summaries:\n".to_string());
-            for summary in recent_summaries {
-                context_parts.push(format!("- {}\n", summary.summary_text));
+            for summary in &recent_summaries {
+                let date = summary.timestamp.format("%Y-%m-%d");
+                context_parts.push(format!("- [{}] {}\n", date, summary.summary_text));
                 if !summary.key_facts.is_empty() {
                     context_parts.push(format!("  Facts: {}\n", summary.key_facts.join(", ")));
                 }
             }
             context_parts.push("\n".to_string());
+        }
+
+        // 3. Semantically relevant older summary (if not already in recent 3)
+        {
+            let ltm = self.long_term_memory.lock().await;
+            match ltm.embed_text(user_query) {
+                Ok(query_embedding) => {
+                    drop(ltm); // Release lock before DB query
+                    match self
+                        .summarization_agent
+                        .search_similar_summaries(&query_embedding, 1, 0.6)
+                        .await
+                    {
+                        Ok(results) => {
+                            if let Some((similarity, summary)) = results.into_iter().next() {
+                                if !recent_ids.contains(&summary.id) {
+                                    let date = summary.timestamp.format("%Y-%m-%d");
+                                    context_parts
+                                        .push("## Relevant Earlier Conversation:\n".to_string());
+                                    context_parts.push(format!(
+                                        "- [{}] {} (relevance: {:.0}%)\n",
+                                        date,
+                                        summary.summary_text,
+                                        similarity * 100.0
+                                    ));
+                                    if !summary.key_facts.is_empty() {
+                                        context_parts.push(format!(
+                                            "  Facts: {}\n",
+                                            summary.key_facts.join(", ")
+                                        ));
+                                    }
+                                    context_parts.push("\n".to_string());
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::debug!("Semantic summary search skipped: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!("Failed to embed query for summary search: {}", e);
+                }
+            }
         }
 
         // Note: Working memory messages are sent separately via with_history()

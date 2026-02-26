@@ -225,8 +225,18 @@ impl LongTermMemory {
         Ok(results)
     }
 
+    /// Compute embedding vector for a text string.
+    /// Exposed for use by other memory components (e.g. SummarizationAgent).
+    pub fn embed_text(&self, text: &str) -> Result<Vec<f32>> {
+        let embeddings = self
+            .embedder
+            .embed(&[text.to_string()])
+            .context("Failed to generate embedding")?;
+        Ok(embeddings.into_iter().next().unwrap())
+    }
+
     /// Calculate cosine similarity between two vectors
-    fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    pub(crate) fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         if a.len() != b.len() {
             return 0.0;
         }
@@ -243,12 +253,12 @@ impl LongTermMemory {
     }
 
     /// Convert vector to bytes for storage
-    fn vec_to_bytes(vec: &[f32]) -> Vec<u8> {
+    pub(crate) fn vec_to_bytes(vec: &[f32]) -> Vec<u8> {
         vec.iter().flat_map(|f| f.to_le_bytes()).collect()
     }
 
     /// Convert bytes back to vector
-    fn bytes_to_vec(bytes: &[u8]) -> Vec<f32> {
+    pub(crate) fn bytes_to_vec(bytes: &[u8]) -> Vec<f32> {
         bytes
             .chunks(4)
             .map(|chunk| {
