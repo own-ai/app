@@ -11,7 +11,7 @@ pub async fn load_tasks(db: &Pool<Sqlite>, instance_id: &str) -> Result<Vec<Sche
     let rows = sqlx::query(
         r#"
         SELECT id, instance_id, name, cron_expression, task_prompt,
-               enabled, last_run, last_result, created_at
+               enabled, notify, last_run, last_result, created_at
         FROM scheduled_tasks
         WHERE instance_id = ?
         ORDER BY created_at ASC
@@ -31,6 +31,7 @@ pub async fn load_tasks(db: &Pool<Sqlite>, instance_id: &str) -> Result<Vec<Sche
             cron_expression: row.get("cron_expression"),
             task_prompt: row.get("task_prompt"),
             enabled: row.get::<i32, _>("enabled") != 0,
+            notify: row.get::<i32, _>("notify") != 0,
             last_run: row.get("last_run"),
             last_result: row.get("last_result"),
             created_at: row.get("created_at"),
@@ -45,8 +46,8 @@ pub async fn save_task(db: &Pool<Sqlite>, task: &ScheduledTask) -> Result<()> {
     sqlx::query(
         r#"
         INSERT INTO scheduled_tasks
-            (id, instance_id, name, cron_expression, task_prompt, enabled, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (id, instance_id, name, cron_expression, task_prompt, enabled, notify, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(&task.id)
@@ -55,6 +56,7 @@ pub async fn save_task(db: &Pool<Sqlite>, task: &ScheduledTask) -> Result<()> {
     .bind(&task.cron_expression)
     .bind(&task.task_prompt)
     .bind(task.enabled as i32)
+    .bind(task.notify as i32)
     .bind(task.created_at)
     .execute(db)
     .await
@@ -125,7 +127,7 @@ pub async fn get_task(db: &Pool<Sqlite>, task_id: &str) -> Result<Option<Schedul
     let row = sqlx::query(
         r#"
         SELECT id, instance_id, name, cron_expression, task_prompt,
-               enabled, last_run, last_result, created_at
+               enabled, notify, last_run, last_result, created_at
         FROM scheduled_tasks
         WHERE id = ?
         "#,
@@ -142,6 +144,7 @@ pub async fn get_task(db: &Pool<Sqlite>, task_id: &str) -> Result<Option<Schedul
         cron_expression: row.get("cron_expression"),
         task_prompt: row.get("task_prompt"),
         enabled: row.get::<i32, _>("enabled") != 0,
+        notify: row.get::<i32, _>("notify") != 0,
         last_run: row.get("last_run"),
         last_result: row.get("last_result"),
         created_at: row.get("created_at"),
@@ -171,6 +174,7 @@ mod tests {
             cron_expression: "0 8 * * *".to_string(),
             task_prompt: "Do something".to_string(),
             enabled: true,
+            notify: true,
             last_run: None,
             last_result: None,
             created_at: Utc::now(),

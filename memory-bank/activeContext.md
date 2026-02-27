@@ -69,6 +69,18 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 
 ## Recent Changes
 
+- **Scheduled Task Result Delivery (Post-Phase 4)**:
+  - **Problem**: Scheduled tasks emitted events (`scheduler:task_completed`/`scheduler:task_failed`) but no one consumed them -- results were lost
+  - **Solution**: Full pipeline from backend to user notification:
+    - **Backend (runner.rs)**: Successful task results saved as **agent messages** (role='agent') in DB -- the LLM generated the response, so it appears as the AI speaking naturally. Errors saved as system messages (role='system'). `save_task_result_as_message(db, role, content)` takes a role parameter. Conditionally (if `notify`) sends OS notification via `send_task_notification()` and emits Tauri events to frontend.
+    - **`notify` flag**: New `notify: bool` field on `ScheduledTask` (DB column with migration, default true). LLM can set `notify: false` for silent background tasks. Exposed in tool definition parameters JSON.
+    - **Frontend (App.tsx)**: Event listeners for `scheduler:task_completed` and `scheduler:task_failed`. Completed tasks appear as `role: "agent"` messages (natural AI response). Failed tasks appear as `role: "system"` messages with i18n error formatting.
+    - **i18n**: `scheduler.task_failed_message` in EN and DE (no wrapper for success -- result shown directly as agent message).
+    - **TypeScript**: `notify: boolean` added to `ScheduledTask` interface.
+    - **Notification click**: On macOS, clicking a notification brings the app to the foreground by default.
+  - Files changed: `schema.rs`, `scheduler/mod.rs`, `scheduler/storage.rs`, `scheduler/runner.rs`, `scheduler/tools.rs`, `commands/scheduler.rs`, `App.tsx`, `types/index.ts`, `en/translation.json`, `de/translation.json`
+  - All 179 Rust tests pass, TypeScript compiles clean
+
 - **Memory System Enhancement (Post-Phase 4)**:
   - **SummarizationAgent refactored**: Moved LLM summarization logic from scattered code in `agent/mod.rs` into clean `SummarizationAgent` with `SummaryExtractor` trait abstraction
   - **Summary Embeddings**: Summaries now get an `embedding BLOB` column, computed automatically via fastembed when saved. Migration handled gracefully in `init_table()`

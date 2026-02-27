@@ -76,6 +76,8 @@
 - [x] 3 scheduler Tauri commands (list_scheduled_tasks, delete_scheduled_task, toggle_scheduled_task)
 - [x] Task execution via temporary agents with build_sub_agent_tools()
 - [x] Tasks loaded and registered for all instances on app startup
+- [x] Scheduled task result delivery: results saved as DB messages, OS notifications, live chat UI updates
+- [x] `notify` flag on scheduled tasks (default true, LLM can set false for silent tasks)
 - [x] Dynamic system prompt (all capabilities documented via base_tools_prompt())
 - [x] SummarizationAgent with SummaryExtractor trait (clean architecture, owns summarization logic)
 - [x] Summary embeddings (embedding BLOB column, auto-computed via fastembed on save)

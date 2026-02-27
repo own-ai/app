@@ -91,7 +91,8 @@
     "confirm_delete": "Geplante Aufgabe \"{{name}}\" löschen? Das kann nicht rückgängig gemacht werden.",
     "last_run": "Letzter Lauf",
     "cron": "Zeitplan",
-    "never_run": "Noch nicht gelaufen"
+    "never_run": "Noch nicht gelaufen",
+    "task_failed_message": "Geplante Aufgabe \"{{name}}\" fehlgeschlagen: {{error}}"
   },
   "errors": {
     "generic": "Etwas ist schiefgelaufen. Bitte versuche es erneut.",

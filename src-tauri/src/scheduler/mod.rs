@@ -37,6 +37,10 @@ pub struct ScheduledTask {
     pub cron_expression: String,
     pub task_prompt: String,
     pub enabled: bool,
+    /// Whether to send OS notifications and show results in the chat on completion.
+    /// When false, results are still saved in last_result and as messages in the DB,
+    /// but no notification or frontend event is emitted.
+    pub notify: bool,
     pub last_run: Option<DateTime<Utc>>,
     pub last_result: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -191,6 +195,7 @@ mod tests {
             cron_expression: "0 8 * * *".to_string(),
             task_prompt: "Remind me to check emails".to_string(),
             enabled: true,
+            notify: true,
             last_run: None,
             last_result: None,
             created_at: Utc::now(),

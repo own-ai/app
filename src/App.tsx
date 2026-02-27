@@ -119,6 +119,53 @@ function App() {
     };
   }, [activeInstance, loadPrograms, setViewMode, selectProgram]);
 
+  // Listen for scheduler task completion/failure events
+  useEffect(() => {
+    let unlistenCompleted: UnlistenFn | null = null;
+    let unlistenFailed: UnlistenFn | null = null;
+
+    const setup = async () => {
+      unlistenCompleted = await listen<{
+        instance_id: string;
+        task_name: string;
+        result: string;
+      }>("scheduler:task_completed", (event) => {
+        const { instance_id, result } = event.payload;
+        const currentInstance = useInstanceStore.getState().activeInstance;
+        if (currentInstance && currentInstance.id === instance_id) {
+          addMessage({
+            role: "agent" as const,
+            content: result,
+          });
+        }
+      });
+
+      unlistenFailed = await listen<{
+        instance_id: string;
+        task_name: string;
+        error: string;
+      }>("scheduler:task_failed", (event) => {
+        const { instance_id, task_name, error } = event.payload;
+        const currentInstance = useInstanceStore.getState().activeInstance;
+        if (currentInstance && currentInstance.id === instance_id) {
+          addMessage({
+            role: "system" as const,
+            content: t("scheduler.task_failed_message", {
+              name: task_name,
+              error,
+            }),
+          });
+        }
+      });
+    };
+
+    setup();
+    return () => {
+      if (unlistenCompleted) unlistenCompleted();
+      if (unlistenFailed) unlistenFailed();
+    };
+  }, [addMessage, t]);
+
   // Listen for canvas:program_updated events from the backend (auto-reload)
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;

@@ -91,7 +91,8 @@
     "confirm_delete": "Delete scheduled task \"{{name}}\"? This cannot be undone.",
     "last_run": "Last run",
     "cron": "Schedule",
-    "never_run": "Never run yet"
+    "never_run": "Never run yet",
+    "task_failed_message": "Scheduled task \"{{name}}\" failed: {{error}}"
   },
   "errors": {
     "generic": "Something went wrong. Please try again.",

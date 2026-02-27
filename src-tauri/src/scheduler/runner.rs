@@ -39,6 +39,7 @@ pub async fn register_task_job(
     task_name: String,
     task_prompt: String,
     instance_id: String,
+    notify: bool,
     manager: Arc<Mutex<AIInstanceManager>>,
     app_handle: AppHandle,
 ) -> Result<()> {
@@ -72,8 +73,8 @@ pub async fn register_task_job(
                             result.len()
                         );
 
-                        // Update last_run in database
                         if let Ok(db) = init_database(&instance_id).await {
+                            // Update last_run in scheduled_tasks table
                             let truncated = if result.len() > 2000 {
                                 format!("{}...", &result[..2000])
                             } else {
@@ -84,37 +85,56 @@ pub async fn register_task_job(
                             {
                                 tracing::warn!("Failed to update task last_run: {}", e);
                             }
+
+                            // Save result as agent message in chat history
+                            // (the LLM generated this response, so it appears as the AI speaking)
+                            save_task_result_as_message(&db, "agent", &result).await;
                         }
 
-                        // Emit event to frontend
-                        let payload = serde_json::json!({
-                            "task_id": task_id,
-                            "task_name": task_name,
-                            "instance_id": instance_id,
-                            "result": result,
-                        });
-                        if let Err(e) = app_handle.emit("scheduler:task_completed", payload) {
-                            tracing::warn!("Failed to emit task_completed event: {}", e);
+                        if notify {
+                            // Send OS notification
+                            send_task_notification(&app_handle, &task_name, &result, true);
+
+                            // Emit event to frontend (for live chat update)
+                            let payload = serde_json::json!({
+                                "task_id": task_id,
+                                "task_name": task_name,
+                                "instance_id": instance_id,
+                                "result": result,
+                            });
+                            if let Err(e) = app_handle.emit("scheduler:task_completed", payload) {
+                                tracing::warn!("Failed to emit task_completed event: {}", e);
+                            }
                         }
                     }
                     Err(e) => {
                         tracing::error!("Scheduled task '{}' failed: {}", task_name, e);
 
-                        // Update last_run with error
                         if let Ok(db) = init_database(&instance_id).await {
+                            // Update last_run with error
                             let error_msg = format!("Error: {}", e);
                             let _ = storage::update_task_last_run(&db, &task_id, &error_msg).await;
+
+                            // Save error as system message in chat history
+                            let message_content =
+                                format!("[Scheduled Task \"{}\" -- Error]\n{}", task_name, e);
+                            save_task_result_as_message(&db, "system", &message_content).await;
                         }
 
-                        // Emit error event
-                        let payload = serde_json::json!({
-                            "task_id": task_id,
-                            "task_name": task_name,
-                            "instance_id": instance_id,
-                            "error": e.to_string(),
-                        });
-                        if let Err(e) = app_handle.emit("scheduler:task_failed", payload) {
-                            tracing::warn!("Failed to emit task_failed event: {}", e);
+                        if notify {
+                            // Send OS notification for failure
+                            send_task_notification(&app_handle, &task_name, &e.to_string(), false);
+
+                            // Emit error event to frontend
+                            let payload = serde_json::json!({
+                                "task_id": task_id,
+                                "task_name": task_name,
+                                "instance_id": instance_id,
+                                "error": e.to_string(),
+                            });
+                            if let Err(e) = app_handle.emit("scheduler:task_failed", payload) {
+                                tracing::warn!("Failed to emit task_failed event: {}", e);
+                            }
                         }
                     }
                 }
@@ -123,6 +143,64 @@ pub async fn register_task_job(
         .await?;
 
     Ok(())
+}
+
+/// Save a task result (or error) as a message in the instance's chat history.
+///
+/// Successful task results are saved with `role = "agent"` (the LLM generated the
+/// response, so it appears as the AI speaking). Errors are saved with `role = "system"`.
+async fn save_task_result_as_message(db: &Pool<Sqlite>, role: &str, content: &str) {
+    let msg_id = uuid::Uuid::new_v4().to_string();
+    let now = chrono::Utc::now();
+
+    if let Err(e) =
+        sqlx::query("INSERT INTO messages (id, role, content, timestamp) VALUES (?, ?, ?, ?)")
+            .bind(&msg_id)
+            .bind(role)
+            .bind(content)
+            .bind(now)
+            .execute(db)
+            .await
+    {
+        tracing::warn!("Failed to save task result as message: {}", e);
+    }
+}
+
+/// Send an OS notification for a scheduled task result.
+fn send_task_notification(app_handle: &AppHandle, task_name: &str, body: &str, success: bool) {
+    use tauri_plugin_notification::NotificationExt;
+
+    let title = if success {
+        format!("Task: {}", task_name)
+    } else {
+        format!("Task failed: {}", task_name)
+    };
+
+    // Truncate body for notification (OS notifications have limited space)
+    let truncated_body = if body.len() > 200 {
+        format!("{}...", &body[..200])
+    } else {
+        body.to_string()
+    };
+
+    match app_handle
+        .notification()
+        .builder()
+        .title(&title)
+        .body(&truncated_body)
+        .show()
+    {
+        Ok(_) => {
+            tracing::debug!("Sent notification for task '{}'", task_name);
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Failed to send notification for task '{}': {}",
+                task_name,
+                e
+            );
+        }
+    }
 }
 
 /// Execute a scheduled task by creating a temporary agent and running the prompt.
@@ -285,6 +363,7 @@ pub async fn load_and_register_instance_tasks(
             task.name.clone(),
             task.task_prompt.clone(),
             task.instance_id.clone(),
+            task.notify,
             manager.clone(),
             app_handle.clone(),
         )

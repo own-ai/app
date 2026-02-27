@@ -41,6 +41,14 @@ pub struct CreateScheduledTaskArgs {
     cron_expression: String,
     /// The prompt that will be sent to a temporary agent each time the task fires.
     task_prompt: String,
+    /// Whether to send OS notifications and show results in the chat when the task completes.
+    /// Defaults to true. Set to false for silent background tasks.
+    #[serde(default = "default_notify")]
+    notify: bool,
+}
+
+fn default_notify() -> bool {
+    true
 }
 
 /// rig Tool that allows the agent to create scheduled tasks.
@@ -109,6 +117,10 @@ impl Tool for CreateScheduledTaskTool {
                     "task_prompt": {
                         "type": "string",
                         "description": "The prompt that a temporary agent will execute each time the task fires"
+                    },
+                    "notify": {
+                        "type": "boolean",
+                        "description": "Whether to send OS notifications and show results in the chat when the task completes. Defaults to true. Set to false for silent background tasks."
                     }
                 },
                 "required": ["name", "cron_expression", "task_prompt"]
@@ -141,6 +153,7 @@ impl Tool for CreateScheduledTaskTool {
             cron_expression: args.cron_expression.clone(),
             task_prompt: args.task_prompt.clone(),
             enabled: true,
+            notify: args.notify,
             last_run: None,
             last_result: None,
             created_at: Utc::now(),
@@ -160,6 +173,7 @@ impl Tool for CreateScheduledTaskTool {
                 task.name.clone(),
                 task.task_prompt.clone(),
                 task.instance_id.clone(),
+                task.notify,
                 manager.clone(),
                 app_handle.clone(),
             )
@@ -427,6 +441,7 @@ mod tests {
                 name: "test".to_string(),
                 cron_expression: "0 8 * * *".to_string(),
                 task_prompt: "test prompt".to_string(),
+                notify: true,
             },
         )
         .await;

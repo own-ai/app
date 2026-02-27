@@ -88,6 +88,7 @@ pub async fn toggle_scheduled_task(
             task.name,
             task.task_prompt,
             task.instance_id,
+            task.notify,
             instance_manager.inner().clone(),
             app_handle,
         )

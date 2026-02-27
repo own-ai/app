@@ -61,6 +61,7 @@ export interface ScheduledTask {
   cron_expression: string;
   task_prompt: string;
   enabled: boolean;
+  notify: boolean;
   last_run: string | null;
   last_result: string | null;
   created_at: string;

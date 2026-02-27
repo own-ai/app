@@ -157,6 +157,7 @@ pub async fn create_tables(pool: &Pool<Sqlite>) -> Result<()> {
             cron_expression TEXT NOT NULL,
             task_prompt TEXT NOT NULL,
             enabled INTEGER NOT NULL DEFAULT 1,
+            notify INTEGER NOT NULL DEFAULT 1,
             last_run DATETIME,
             last_result TEXT,
             created_at DATETIME NOT NULL
@@ -166,6 +167,11 @@ pub async fn create_tables(pool: &Pool<Sqlite>) -> Result<()> {
     .execute(pool)
     .await
     .context("Failed to create scheduled_tasks table")?;
+
+    // Migration: Add notify column if missing (for existing databases)
+    let _ = sqlx::query("ALTER TABLE scheduled_tasks ADD COLUMN notify INTEGER NOT NULL DEFAULT 1")
+        .execute(pool)
+        .await;
 
     // Index for scheduled tasks by instance_id
     sqlx::query(
