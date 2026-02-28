@@ -13,6 +13,7 @@ use sqlx::{Pool, Row, Sqlite};
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 
 use crate::ai_instances::{AIInstance, APIKeyStorage, LLMProvider};
@@ -230,7 +231,7 @@ impl FactExtractorProvider {
 /// OwnAI Agent with Memory, Tools, and LLM integration
 pub struct OwnAIAgent {
     agent: AgentProvider,
-    fact_extractor: FactExtractorProvider,
+    fact_extractor: Arc<FactExtractorProvider>,
     context_builder: ContextBuilder,
     db: Pool<Sqlite>,
     #[allow(dead_code)]
@@ -463,7 +464,7 @@ impl OwnAIAgent {
 
         Ok(OwnAIAgent {
             agent,
-            fact_extractor,
+            fact_extractor: Arc::new(fact_extractor),
             context_builder,
             db,
             todo_list,
@@ -579,9 +580,8 @@ impl OwnAIAgent {
             .await?;
         self.add_to_working_memory(agent_msg).await;
 
-        // 8. Extract and store facts in long-term memory (non-blocking)
-        self.extract_and_store_facts(user_message, &response, &agent_msg_id)
-            .await;
+        // 8. Extract and store facts in long-term memory (background task)
+        self.spawn_fact_extraction(user_message, &response, &agent_msg_id);
 
         Ok(response)
     }
@@ -668,9 +668,8 @@ impl OwnAIAgent {
             .await?;
         self.add_to_working_memory(agent_msg).await;
 
-        // 7. Extract and store facts in long-term memory (non-blocking)
-        self.extract_and_store_facts(user_message, &full_response, &agent_msg_id)
-            .await;
+        // 7. Extract and store facts in long-term memory (background task)
+        self.spawn_fact_extraction(user_message, &full_response, &agent_msg_id);
 
         Ok(full_response)
     }
@@ -795,46 +794,45 @@ Remember: You are building a long-term relationship with this user."#,
         &self.tool_registry
     }
 
-    /// Extract facts from a conversation turn and store them in long-term memory.
-    /// Called after each agent response to build up semantic knowledge over time.
-    async fn extract_and_store_facts(
-        &mut self,
-        user_message: &str,
-        agent_response: &str,
-        agent_msg_id: &str,
-    ) {
-        // Format conversation turn for extraction
+    /// Spawn fact extraction as a background task so it does not block
+    /// the completion of chat/streaming. The task runs independently and
+    /// logs any errors via tracing.
+    fn spawn_fact_extraction(&self, user_message: &str, agent_response: &str, agent_msg_id: &str) {
+        let fact_extractor = self.fact_extractor.clone();
+        let long_term_memory = self.context_builder.long_term_memory().clone();
         let conversation_turn = format!("User: {}\nAgent: {}", user_message, agent_response);
+        let agent_msg_id = agent_msg_id.to_string();
 
-        // Extract facts using LLM
-        match self.fact_extractor.extract(&conversation_turn).await {
-            Ok(extraction) => {
-                if extraction.facts.is_empty() {
-                    tracing::debug!("No facts extracted from conversation turn");
-                    return;
-                }
+        tokio::spawn(async move {
+            // Extract facts using LLM
+            match fact_extractor.extract(&conversation_turn).await {
+                Ok(extraction) => {
+                    if extraction.facts.is_empty() {
+                        tracing::debug!("No facts extracted from conversation turn");
+                        return;
+                    }
 
-                tracing::info!(
-                    "Extracted {} facts from conversation",
-                    extraction.facts.len()
-                );
+                    tracing::info!(
+                        "Extracted {} facts from conversation",
+                        extraction.facts.len()
+                    );
 
-                // Convert extracted facts to memory entries and store them
-                let long_term_memory = self.context_builder.long_term_memory().clone();
-                let mut mem = long_term_memory.lock().await;
+                    // Convert extracted facts to memory entries and store them
+                    let mut mem = long_term_memory.lock().await;
 
-                for fact_item in extraction.facts {
-                    let entry = fact_extraction::to_memory_entry(fact_item, agent_msg_id);
+                    for fact_item in extraction.facts {
+                        let entry = fact_extraction::to_memory_entry(fact_item, &agent_msg_id);
 
-                    if let Err(e) = mem.store(entry).await {
-                        tracing::warn!("Failed to store extracted fact: {}", e);
+                        if let Err(e) = mem.store(entry).await {
+                            tracing::warn!("Failed to store extracted fact: {}", e);
+                        }
                     }
                 }
+                Err(e) => {
+                    // Don't fail the chat if fact extraction fails - just log it
+                    tracing::warn!("Failed to extract facts from conversation: {}", e);
+                }
             }
-            Err(e) => {
-                // Don't fail the chat if fact extraction fails - just log it
-                tracing::warn!("Failed to extract facts from conversation: {}", e);
-            }
-        }
+        });
     }
 }

@@ -69,6 +69,16 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 
 ## Recent Changes
 
+- **Background Fact Extraction (Post-Phase 4)**:
+  - **Problem**: `extract_and_store_facts()` ran synchronously after each chat/streaming response, blocking the return of `stream_chat()`/`chat()`. This caused the frontend typing cursor to stay visible and events like `canvas:open_program` to be delayed until the LLM fact extraction API call + embedding computation completed.
+  - **Solution**: Replaced blocking `extract_and_store_facts()` with `spawn_fact_extraction()` using `tokio::spawn`:
+    - `fact_extractor` field changed from `FactExtractorProvider` to `Arc<FactExtractorProvider>` for safe sharing across tasks
+    - New `spawn_fact_extraction()` method clones the `Arc<FactExtractorProvider>` and `SharedLongTermMemory`, then spawns the extraction as an independent background task
+    - `stream_chat()` and `chat()` now call `spawn_fact_extraction()` (fire-and-forget, no `.await`) instead of awaiting `extract_and_store_facts()`
+    - Errors are still logged via `tracing::warn` in the spawned task
+  - Files changed: `src-tauri/src/agent/mod.rs`
+  - All 179 Rust tests pass, clippy clean
+
 - **Memory Deduplication (Post-Phase 4)**:
   - **Problem**: Automatic fact extraction (`extract_and_store_facts`) ran after every chat turn, blindly inserting extracted facts into `memory_entries` without checking for existing similar entries. This caused many duplicate/near-duplicate entries.
   - **Solution**: Semantic deduplication in `LongTermMemory::store()`:
