@@ -69,6 +69,16 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 
 ## Recent Changes
 
+- **Memory Deduplication (Post-Phase 4)**:
+  - **Problem**: Automatic fact extraction (`extract_and_store_facts`) ran after every chat turn, blindly inserting extracted facts into `memory_entries` without checking for existing similar entries. This caused many duplicate/near-duplicate entries.
+  - **Solution**: Semantic deduplication in `LongTermMemory::store()`:
+    - New `find_similar()` private method: loads all existing embeddings from DB, computes cosine similarity against the new entry's embedding, returns the ID of the most similar existing entry if above threshold.
+    - `store()` now calls `find_similar()` with threshold 0.92 BEFORE inserting. If a semantically very similar entry already exists, the new entry is silently skipped (with a tracing::info log).
+    - This catches duplicates from ALL three sources: automatic fact extraction, AddMemoryTool, and summarization key facts.
+    - 4 new tests added (all `#[ignore]` since they require fastembed model): `test_dedup_identical_entries`, `test_dedup_semantically_similar_entries`, `test_dedup_allows_different_entries`, `test_dedup_empty_store_no_error`.
+  - Files changed: `src-tauri/src/memory/long_term.rs`
+  - All 179 Rust tests pass, clippy clean
+
 - **Scheduled Task Result Delivery (Post-Phase 4)**:
   - **Problem**: Scheduled tasks emitted events (`scheduler:task_completed`/`scheduler:task_failed`) but no one consumed them -- results were lost
   - **Solution**: Full pipeline from backend to user notification:

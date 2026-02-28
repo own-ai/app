@@ -85,6 +85,7 @@
 - [x] Semantic summary search (cosine similarity on summary embeddings)
 - [x] Context builder: 3 recent summaries + semantically relevant older summary (threshold 0.6)
 - [x] Summary dates shown in context ("[YYYY-MM-DD] summary text")
+- [x] Memory deduplication: semantic similarity check (cosine >= 0.92) in `store()` prevents duplicate/near-duplicate entries
 
 ## What's Left to Build
 

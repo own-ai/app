@@ -99,7 +99,13 @@ impl LongTermMemory {
         Ok(())
     }
 
-    /// Store a memory entry with its embedding
+    /// Similarity threshold for deduplication.
+    /// Entries with cosine similarity above this value are considered duplicates.
+    const DEDUP_SIMILARITY_THRESHOLD: f32 = 0.92;
+
+    /// Store a memory entry with its embedding.
+    /// Performs semantic deduplication: if a very similar entry already exists
+    /// (cosine similarity >= DEDUP_SIMILARITY_THRESHOLD), the new entry is skipped.
     pub async fn store(&mut self, entry: MemoryEntry) -> Result<()> {
         // Generate embedding
         let embeddings = self
@@ -108,6 +114,20 @@ impl LongTermMemory {
             .context("Failed to generate embedding")?;
 
         let embedding_vec = &embeddings[0];
+
+        // Check for semantic duplicates before inserting
+        if let Some(existing_id) = self
+            .find_similar(embedding_vec, Self::DEDUP_SIMILARITY_THRESHOLD)
+            .await?
+        {
+            tracing::info!(
+                "Skipping duplicate memory entry '{}' (similar to existing entry {})",
+                entry.content,
+                existing_id
+            );
+            return Ok(());
+        }
+
         let embedding_bytes = Self::vec_to_bytes(embedding_vec);
 
         // Store in database
@@ -140,6 +160,36 @@ impl LongTermMemory {
         );
 
         Ok(())
+    }
+
+    /// Find the most similar existing memory entry above a similarity threshold.
+    /// Returns the ID of the most similar entry, or None if no entry is similar enough.
+    async fn find_similar(&self, embedding: &[f32], threshold: f32) -> Result<Option<String>> {
+        let rows = sqlx::query("SELECT id, embedding FROM memory_entries")
+            .fetch_all(&self.db)
+            .await?;
+
+        let mut best_match: Option<(f32, String)> = None;
+
+        for row in rows {
+            let existing_bytes: Vec<u8> = row.get("embedding");
+            let existing_vec = Self::bytes_to_vec(&existing_bytes);
+            let similarity = Self::cosine_similarity(embedding, &existing_vec);
+
+            if similarity >= threshold {
+                match &best_match {
+                    Some((best_sim, _)) if similarity > *best_sim => {
+                        best_match = Some((similarity, row.get("id")));
+                    }
+                    None => {
+                        best_match = Some((similarity, row.get("id")));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(best_match.map(|(_, id)| id))
     }
 
     /// Recall memories using semantic search
@@ -494,5 +544,94 @@ mod tests {
             .expect("Failed to search");
 
         assert_eq!(results.len(), 0);
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires fastembed model download (slow, ~1GB)
+    async fn test_dedup_identical_entries() {
+        let db = setup_test_db().await;
+        let mut memory = LongTermMemory::new(db)
+            .await
+            .expect("Failed to create LongTermMemory");
+
+        // Store the same fact twice
+        let entry1 = create_test_entry("e1", "User speaks German", MemoryType::Fact);
+        let entry2 = create_test_entry("e2", "User speaks German", MemoryType::Fact);
+
+        memory.store(entry1).await.expect("Failed to store first");
+        memory.store(entry2).await.expect("Failed to store second");
+
+        // Only one entry should exist (second was deduplicated)
+        let count = memory.count().await.expect("Failed to count");
+        assert_eq!(count, 1, "Identical entry should be deduplicated");
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires fastembed model download (slow, ~1GB)
+    async fn test_dedup_semantically_similar_entries() {
+        let db = setup_test_db().await;
+        let mut memory = LongTermMemory::new(db)
+            .await
+            .expect("Failed to create LongTermMemory");
+
+        // Store semantically very similar facts (same meaning, different wording)
+        let entry1 = create_test_entry("e1", "User speaks German", MemoryType::Fact);
+        let entry2 = create_test_entry("e2", "Jan speaks German", MemoryType::Fact);
+        let entry3 = create_test_entry("e3", "The user's language is German", MemoryType::Fact);
+
+        memory.store(entry1).await.expect("Failed to store first");
+        memory.store(entry2).await.expect("Failed to store second");
+        memory.store(entry3).await.expect("Failed to store third");
+
+        // Similar entries should be deduplicated (exact count depends on model,
+        // but should be fewer than 3)
+        let count = memory.count().await.expect("Failed to count");
+        assert!(
+            count < 3,
+            "Semantically similar entries should be deduplicated, got {} entries",
+            count
+        );
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires fastembed model download (slow, ~1GB)
+    async fn test_dedup_allows_different_entries() {
+        let db = setup_test_db().await;
+        let mut memory = LongTermMemory::new(db)
+            .await
+            .expect("Failed to create LongTermMemory");
+
+        // Store genuinely different facts
+        let entry1 = create_test_entry("e1", "User speaks German", MemoryType::Fact);
+        let entry2 = create_test_entry("e2", "User enjoys playing Tic-Tac-Toe", MemoryType::Fact);
+        let entry3 = create_test_entry("e3", "User lives in Karlsruhe", MemoryType::Fact);
+
+        memory.store(entry1).await.expect("Failed to store first");
+        memory.store(entry2).await.expect("Failed to store second");
+        memory.store(entry3).await.expect("Failed to store third");
+
+        // All three should be stored (they are genuinely different)
+        let count = memory.count().await.expect("Failed to count");
+        assert_eq!(
+            count, 3,
+            "Different entries should all be stored, got {} entries",
+            count
+        );
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires fastembed model download (slow, ~1GB)
+    async fn test_dedup_empty_store_no_error() {
+        let db = setup_test_db().await;
+        let mut memory = LongTermMemory::new(db)
+            .await
+            .expect("Failed to create LongTermMemory");
+
+        // First store should always succeed (nothing to dedup against)
+        let entry = create_test_entry("e1", "User's name is Jan", MemoryType::Fact);
+        memory.store(entry).await.expect("Failed to store");
+
+        let count = memory.count().await.expect("Failed to count");
+        assert_eq!(count, 1);
     }
 }
