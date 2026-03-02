@@ -21,6 +21,10 @@ use crate::canvas::tools::{
 };
 use crate::memory::SharedLongTermMemory;
 use crate::tools::code_generation::{CreateToolTool, ReadToolTool, UpdateToolTool};
+use crate::tools::collection_tools::{
+    CreateKnowledgeCollectionTool, DeleteKnowledgeCollectionTool, IngestDocumentTool,
+    ListKnowledgeCollectionsTool,
+};
 use crate::tools::filesystem::{EditFileTool, GrepTool, LsTool, ReadFileTool, WriteFileTool};
 use crate::tools::memory_tools::{AddMemoryTool, DeleteMemoryTool, SearchMemoryTool};
 use crate::tools::planning::{self, ReadTodosTool, WriteTodosTool};
@@ -89,7 +93,7 @@ pub fn build_sub_agent_tools(
         // Self-programming: create, read, and update dynamic tools
         Box::new(CreateToolTool::new(registry.clone(), workspace.clone())),
         Box::new(ReadToolTool::new(registry.clone())),
-        Box::new(UpdateToolTool::new(registry, workspace)),
+        Box::new(UpdateToolTool::new(registry, workspace.clone())),
         // Canvas program tools
         Box::new(CreateProgramTool::new(
             db.clone(),
@@ -112,15 +116,20 @@ pub fn build_sub_agent_tools(
             app_handle.clone(),
         )),
         Box::new(ProgramEditFileTool::new(
-            db,
+            db.clone(),
             instance_id.to_string(),
             programs_root,
             app_handle,
         )),
         // Memory tools
-        Box::new(SearchMemoryTool::new(long_term_memory.clone())),
-        Box::new(AddMemoryTool::new(long_term_memory.clone())),
-        Box::new(DeleteMemoryTool::new(long_term_memory)),
+        Box::new(SearchMemoryTool::new(long_term_memory.clone(), db.clone())),
+        Box::new(AddMemoryTool::new(long_term_memory.clone(), db.clone())),
+        Box::new(DeleteMemoryTool::new(long_term_memory.clone())),
+        // Knowledge Collection tools
+        Box::new(CreateKnowledgeCollectionTool::new(db.clone())),
+        Box::new(ListKnowledgeCollectionsTool::new(db.clone())),
+        Box::new(DeleteKnowledgeCollectionTool::new(db.clone())),
+        Box::new(IngestDocumentTool::new(db, long_term_memory, workspace)),
     ]
 }
 
@@ -177,6 +186,24 @@ Use memory tools to:
 - Store and retrieve knowledge across conversations
 - Organize information that should persist long-term
 - Clean up outdated or incorrect memories
+
+### Knowledge Collections
+- **create_knowledge_collection**: Create a named collection to organize domain-specific knowledge by topic
+- **list_knowledge_collections**: List all knowledge collections with their entry counts
+- **delete_knowledge_collection**: Delete a collection and all its entries
+- **ingest_document**: Automatically read a document (PDF, DOCX, Markdown, text), chunk it, and store all chunks in a collection
+
+Use knowledge collections to:
+- Organize large amounts of domain knowledge by topic (e.g. "funding-guidelines", "project-docs")
+- Ingest entire documents so the user can ask questions about them later
+- Keep related knowledge grouped and manageable
+- The user must first copy files into the workspace, then you can ingest them
+
+### How to Ingest a Document
+1. Ask the user to place the file in the workspace (or use write_file if you have the content)
+2. Call `ingest_document` with the file path and a collection name
+3. The document is automatically parsed, chunked, and stored with embeddings
+4. Use `search_memory` to find specific information within the ingested content
 
 ## Self-Programming
 

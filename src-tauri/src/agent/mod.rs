@@ -30,6 +30,10 @@ use crate::scheduler::{
     CreateScheduledTaskTool, DeleteScheduledTaskTool, ListScheduledTasksTool, SharedScheduler,
 };
 use crate::tools::code_generation::{CreateToolTool, ReadToolTool, UpdateToolTool};
+use crate::tools::collection_tools::{
+    CreateKnowledgeCollectionTool, DeleteKnowledgeCollectionTool, IngestDocumentTool,
+    ListKnowledgeCollectionsTool,
+};
 use crate::tools::filesystem::{EditFileTool, GrepTool, LsTool, ReadFileTool, WriteFileTool};
 use crate::tools::memory_tools::{AddMemoryTool, DeleteMemoryTool, SearchMemoryTool};
 use crate::tools::planning::{self, ReadTodosTool, SharedTodoList, WriteTodosTool};
@@ -106,7 +110,7 @@ fn create_tools(
         // Self-programming: create, read, and update dynamic tools
         Box::new(CreateToolTool::new(registry.clone(), workspace.clone())),
         Box::new(ReadToolTool::new(registry.clone())),
-        Box::new(UpdateToolTool::new(registry.clone(), workspace)),
+        Box::new(UpdateToolTool::new(registry.clone(), workspace.clone())),
         // Canvas program tools
         Box::new(CreateProgramTool::new(
             db.clone(),
@@ -135,8 +139,8 @@ fn create_tools(
             app_handle.clone(),
         )),
         // Memory tools (long-term vector store)
-        Box::new(SearchMemoryTool::new(long_term_memory.clone())),
-        Box::new(AddMemoryTool::new(long_term_memory.clone())),
+        Box::new(SearchMemoryTool::new(long_term_memory.clone(), db.clone())),
+        Box::new(AddMemoryTool::new(long_term_memory.clone(), db.clone())),
         Box::new(DeleteMemoryTool::new(long_term_memory.clone())),
         // Task delegation (sub-agents)
         Box::new(DelegateTaskTool::new(
@@ -146,8 +150,17 @@ fn create_tools(
             registry,
             db.clone(),
             programs_root,
-            long_term_memory,
+            long_term_memory.clone(),
             app_handle.clone(),
+        )),
+        // Knowledge collection tools (document ingestion & organization)
+        Box::new(CreateKnowledgeCollectionTool::new(db.clone())),
+        Box::new(ListKnowledgeCollectionsTool::new(db.clone())),
+        Box::new(DeleteKnowledgeCollectionTool::new(db.clone())),
+        Box::new(IngestDocumentTool::new(
+            db.clone(),
+            long_term_memory,
+            workspace,
         )),
     ];
 

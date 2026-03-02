@@ -175,7 +175,16 @@ Long-term Memory (cold)
   ├── Semantic vector search via fastembed
   ├── Entry types: fact, preference, skill, context
   ├── Importance scoring (0.0 - 1.0)
-  └── Stored in `memory_entries` table with embeddings
+  ├── Stored in `memory_entries` table with embeddings
+  ├── Optional collection_id links to knowledge_collections
+  └── recall_with_collection() for collection-filtered search
+          │
+          ▼
+Knowledge Collections (organized)
+  ├── Named topic-based grouping of memory entries
+  ├── Document ingestion pipeline (PDF/DOCX/Markdown/text)
+  ├── Automatic chunking with overlap (400 tokens, 80 overlap)
+  └── Stored in `knowledge_collections` table
 ```
 
 #### Context Builder Assembly

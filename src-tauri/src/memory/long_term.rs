@@ -33,6 +33,8 @@ pub struct MemoryEntry {
     pub access_count: u32,
     pub tags: Vec<String>,
     pub source_message_ids: Vec<String>,
+    /// Optional knowledge collection this entry belongs to.
+    pub collection_id: Option<String>,
 }
 
 /// Long-term memory with vector search using fastembed
@@ -96,6 +98,17 @@ impl LongTermMemory {
         .execute(db)
         .await?;
 
+        // Migration: Add collection_id column if missing (for existing databases)
+        let _ = sqlx::query("ALTER TABLE memory_entries ADD COLUMN collection_id TEXT")
+            .execute(db)
+            .await;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_memory_collection ON memory_entries(collection_id)",
+        )
+        .execute(db)
+        .await?;
+
         Ok(())
     }
 
@@ -135,8 +148,8 @@ impl LongTermMemory {
             r#"
             INSERT INTO memory_entries 
             (id, content, embedding, entry_type, importance, created_at, last_accessed, 
-             access_count, tags, source_message_ids)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             access_count, tags, source_message_ids, collection_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&entry.id)
@@ -149,6 +162,7 @@ impl LongTermMemory {
         .bind(entry.access_count as i32)
         .bind(serde_json::to_string(&entry.tags)?)
         .bind(serde_json::to_string(&entry.source_message_ids)?)
+        .bind(&entry.collection_id)
         .execute(&self.db)
         .await?;
 
@@ -192,12 +206,24 @@ impl LongTermMemory {
         Ok(best_match.map(|(_, id)| id))
     }
 
-    /// Recall memories using semantic search
+    /// Recall memories using semantic search.
     pub async fn recall(
         &mut self,
         query: &str,
         limit: usize,
         min_importance: f32,
+    ) -> Result<Vec<MemoryEntry>> {
+        self.recall_with_collection(query, limit, min_importance, None)
+            .await
+    }
+
+    /// Recall memories using semantic search, optionally filtered by collection.
+    pub async fn recall_with_collection(
+        &mut self,
+        query: &str,
+        limit: usize,
+        min_importance: f32,
+        collection_id: Option<&str>,
     ) -> Result<Vec<MemoryEntry>> {
         // Generate query embedding
         let query_embeddings = self
@@ -207,18 +233,33 @@ impl LongTermMemory {
 
         let query_vec = &query_embeddings[0];
 
-        // Fetch all memories above importance threshold
-        let rows = sqlx::query(
-            r#"
-            SELECT id, content, embedding, entry_type, importance, created_at, 
-                   last_accessed, access_count, tags, source_message_ids
-            FROM memory_entries
-            WHERE importance >= ?
-            "#,
-        )
-        .bind(min_importance)
-        .fetch_all(&self.db)
-        .await?;
+        // Fetch memories above importance threshold, optionally filtered by collection
+        let rows = if let Some(cid) = collection_id {
+            sqlx::query(
+                r#"
+                SELECT id, content, embedding, entry_type, importance, created_at, 
+                       last_accessed, access_count, tags, source_message_ids, collection_id
+                FROM memory_entries
+                WHERE importance >= ? AND collection_id = ?
+                "#,
+            )
+            .bind(min_importance)
+            .bind(cid)
+            .fetch_all(&self.db)
+            .await?
+        } else {
+            sqlx::query(
+                r#"
+                SELECT id, content, embedding, entry_type, importance, created_at, 
+                       last_accessed, access_count, tags, source_message_ids, collection_id
+                FROM memory_entries
+                WHERE importance >= ?
+                "#,
+            )
+            .bind(min_importance)
+            .fetch_all(&self.db)
+            .await?
+        };
 
         // Calculate cosine similarity and sort
         let mut scored_memories: Vec<(f32, MemoryEntry)> = rows
@@ -239,6 +280,7 @@ impl LongTermMemory {
                     access_count: row.get::<i32, _>("access_count") as u32,
                     tags: serde_json::from_str(row.get("tags")).ok()?,
                     source_message_ids: serde_json::from_str(row.get("source_message_ids")).ok()?,
+                    collection_id: row.get("collection_id"),
                 };
 
                 Some((similarity, entry))
@@ -363,6 +405,7 @@ impl LongTermMemory {
                     access_count: row.get::<i32, _>("access_count") as u32,
                     tags: serde_json::from_str(row.get("tags")).ok()?,
                     source_message_ids: serde_json::from_str(row.get("source_message_ids")).ok()?,
+                    collection_id: None,
                 })
             })
             .collect();
@@ -407,6 +450,7 @@ mod tests {
             access_count: 0,
             tags: vec![],
             source_message_ids: vec![],
+            collection_id: None,
         }
     }
 

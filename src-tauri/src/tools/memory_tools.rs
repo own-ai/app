@@ -11,6 +11,9 @@ use rig::tool::Tool;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use sqlx::{Pool, Sqlite};
+
+use crate::memory::collections;
 use crate::memory::fact_extraction::parse_memory_type;
 use crate::memory::{MemoryEntry, SharedLongTermMemory};
 
@@ -37,6 +40,9 @@ pub struct SearchMemoryArgs {
     /// Minimum importance threshold (0.0-1.0, default: 0.0).
     #[serde(default)]
     min_importance: f32,
+    /// Optional collection name to search within (filters to a specific knowledge collection).
+    #[serde(default)]
+    collection: Option<String>,
 }
 
 fn default_limit() -> usize {
@@ -48,12 +54,15 @@ fn default_limit() -> usize {
 pub struct SearchMemoryTool {
     #[serde(skip)]
     memory: Option<SharedLongTermMemory>,
+    #[serde(skip)]
+    db: Option<Pool<Sqlite>>,
 }
 
 impl SearchMemoryTool {
-    pub fn new(memory: SharedLongTermMemory) -> Self {
+    pub fn new(memory: SharedLongTermMemory, db: Pool<Sqlite>) -> Self {
         Self {
             memory: Some(memory),
+            db: Some(db),
         }
     }
 }
@@ -86,6 +95,10 @@ impl Tool for SearchMemoryTool {
                     "min_importance": {
                         "type": "number",
                         "description": "Minimum importance threshold 0.0-1.0 (default: 0.0)"
+                    },
+                    "collection": {
+                        "type": "string",
+                        "description": "Optional: search only within a specific knowledge collection (by name)"
                     }
                 },
                 "required": ["query"]
@@ -99,9 +112,29 @@ impl Tool for SearchMemoryTool {
             .as_ref()
             .ok_or_else(|| MemoryToolError("Long-term memory not initialized".to_string()))?;
 
+        // Resolve collection name to collection_id if specified
+        let collection_id = if let Some(ref name) = args.collection {
+            let db = self
+                .db
+                .as_ref()
+                .ok_or_else(|| MemoryToolError("Database not initialized".to_string()))?;
+            let col = collections::get_collection_by_name(db, name)
+                .await
+                .map_err(|e| MemoryToolError(format!("Failed to look up collection: {}", e)))?
+                .ok_or_else(|| MemoryToolError(format!("Collection '{}' not found", name)))?;
+            Some(col.id)
+        } else {
+            None
+        };
+
         let mut mem = memory.lock().await;
         let results = mem
-            .recall(&args.query, args.limit, args.min_importance)
+            .recall_with_collection(
+                &args.query,
+                args.limit,
+                args.min_importance,
+                collection_id.as_deref(),
+            )
             .await
             .map_err(|e| MemoryToolError(format!("Memory search failed: {}", e)))?;
 
@@ -146,6 +179,9 @@ pub struct AddMemoryArgs {
     /// Importance score from 0.0 to 1.0 (default: 0.7).
     #[serde(default = "default_importance")]
     importance: f32,
+    /// Optional collection name to add this entry to.
+    #[serde(default)]
+    collection: Option<String>,
 }
 
 fn default_entry_type() -> String {
@@ -161,12 +197,15 @@ fn default_importance() -> f32 {
 pub struct AddMemoryTool {
     #[serde(skip)]
     memory: Option<SharedLongTermMemory>,
+    #[serde(skip)]
+    db: Option<Pool<Sqlite>>,
 }
 
 impl AddMemoryTool {
-    pub fn new(memory: SharedLongTermMemory) -> Self {
+    pub fn new(memory: SharedLongTermMemory, db: Pool<Sqlite>) -> Self {
         Self {
             memory: Some(memory),
+            db: Some(db),
         }
     }
 }
@@ -200,6 +239,10 @@ impl Tool for AddMemoryTool {
                     "importance": {
                         "type": "number",
                         "description": "Importance score 0.0-1.0 (default: 0.7)"
+                    },
+                    "collection": {
+                        "type": "string",
+                        "description": "Optional: add this entry to a specific knowledge collection (by name)"
                     }
                 },
                 "required": ["content"]
@@ -212,6 +255,23 @@ impl Tool for AddMemoryTool {
             .memory
             .as_ref()
             .ok_or_else(|| MemoryToolError("Long-term memory not initialized".to_string()))?;
+
+        // Resolve collection name to collection_id if specified
+        let collection_id = if let Some(ref name) = args.collection {
+            let db = self
+                .db
+                .as_ref()
+                .ok_or_else(|| MemoryToolError("Database not initialized".to_string()))?;
+            let col = collections::get_collection_by_name(db, name)
+                .await
+                .map_err(|e| MemoryToolError(format!("Failed to look up collection: {}", e)))?
+                .ok_or_else(|| {
+                    MemoryToolError(format!("Collection '{}' not found. Create it first with create_knowledge_collection.", name))
+                })?;
+            Some(col.id)
+        } else {
+            None
+        };
 
         let memory_type = parse_memory_type(&args.entry_type);
         let importance = args.importance.clamp(0.0, 1.0);
@@ -226,6 +286,7 @@ impl Tool for AddMemoryTool {
             access_count: 0,
             tags: Vec::new(),
             source_message_ids: Vec::new(),
+            collection_id: collection_id.clone(),
         };
 
         let entry_id = entry.id.clone();
@@ -235,17 +296,33 @@ impl Tool for AddMemoryTool {
             .await
             .map_err(|e| MemoryToolError(format!("Failed to store memory: {}", e)))?;
 
+        // Update collection entry count if stored in a collection
+        if let Some(ref col_id) = collection_id {
+            if let Some(db) = self.db.as_ref() {
+                if let Err(e) = collections::update_collection_count(db, col_id).await {
+                    tracing::warn!("Failed to update collection count: {}", e);
+                }
+            }
+        }
+
+        let collection_info = if let Some(ref name) = args.collection {
+            format!(" in collection '{}'", name)
+        } else {
+            String::new()
+        };
+
         tracing::info!(
-            "Agent stored memory '{}' (type: {:?}, importance: {:.2})",
+            "Agent stored memory '{}' (type: {:?}, importance: {:.2}{})",
             entry_id,
             memory_type,
-            importance
+            importance,
+            collection_info
         );
 
         Ok(format!(
-            "Memory stored successfully (id: {}, type: {:?}, importance: {:.2}).\n\
+            "Memory stored successfully (id: {}, type: {:?}, importance: {:.2}{}).\n\
              Content: {}",
-            entry_id, memory_type, importance, args.content
+            entry_id, memory_type, importance, collection_info, args.content
         ))
     }
 }
@@ -347,13 +424,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_memory_no_init() {
-        let tool = SearchMemoryTool { memory: None };
+        let tool = SearchMemoryTool {
+            memory: None,
+            db: None,
+        };
 
         let result = tool
             .call(SearchMemoryArgs {
                 query: "test".to_string(),
                 limit: 5,
                 min_importance: 0.0,
+                collection: None,
             })
             .await;
 
@@ -363,13 +444,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_memory_no_init() {
-        let tool = AddMemoryTool { memory: None };
+        let tool = AddMemoryTool {
+            memory: None,
+            db: None,
+        };
 
         let result = tool
             .call(AddMemoryArgs {
                 content: "test".to_string(),
                 entry_type: "fact".to_string(),
                 importance: 0.5,
+                collection: None,
             })
             .await;
 
@@ -393,7 +478,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_memory_definition() {
-        let tool = SearchMemoryTool { memory: None };
+        let tool = SearchMemoryTool {
+            memory: None,
+            db: None,
+        };
 
         let def = tool.definition("test".to_string()).await;
         assert_eq!(def.name, "search_memory");
@@ -402,7 +490,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_memory_definition() {
-        let tool = AddMemoryTool { memory: None };
+        let tool = AddMemoryTool {
+            memory: None,
+            db: None,
+        };
 
         let def = tool.definition("test".to_string()).await;
         assert_eq!(def.name, "add_memory");

@@ -48,6 +48,7 @@ pub fn to_memory_entry(item: ExtractedFactItem, source_message_id: &str) -> Memo
         access_count: 0,
         tags: Vec::new(),
         source_message_ids: vec![source_message_id.to_string()],
+        collection_id: None,
     }
 }
 

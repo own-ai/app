@@ -137,6 +137,7 @@ pub async fn add_memory_entry(
         access_count: 0,
         tags: Vec::new(),
         source_message_ids: Vec::new(),
+        collection_id: None,
     };
 
     let entry_id = entry.id.clone();

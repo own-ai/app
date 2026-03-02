@@ -220,6 +220,7 @@ impl SummarizationAgent {
                         summary.start_message_id.clone(),
                         summary.end_message_id.clone(),
                     ],
+                    collection_id: None,
                 };
                 if let Err(e) = mem.store(entry).await {
                     tracing::warn!("Failed to store key fact as memory entry: {}", e);

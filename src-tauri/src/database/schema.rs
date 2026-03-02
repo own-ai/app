@@ -184,6 +184,29 @@ pub async fn create_tables(pool: &Pool<Sqlite>) -> Result<()> {
     .await
     .context("Failed to create scheduled_tasks index")?;
 
+    // Knowledge collections table (for organizing domain knowledge)
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS knowledge_collections (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT NOT NULL DEFAULT '',
+            source TEXT,
+            document_count INTEGER NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .context("Failed to create knowledge_collections table")?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_collections_name ON knowledge_collections(name)")
+        .execute(pool)
+        .await
+        .context("Failed to create knowledge_collections name index")?;
+
     tracing::debug!("Database tables created successfully");
 
     Ok(())

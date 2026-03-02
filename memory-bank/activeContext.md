@@ -69,6 +69,31 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 
 ## Recent Changes
 
+- **Knowledge Collections & Document Ingestion (Post-Phase 4)**:
+  - **Purpose**: Organize domain-specific knowledge by topic with automatic document ingestion
+  - **New files**:
+    - `memory/collections.rs`: KnowledgeCollection CRUD (init_collections_table, create, find_or_create, list, delete, clear_entries, update_count, get_by_name/id). 9 tests.
+    - `memory/chunking.rs`: ChunkingConfig (max_chunk_tokens=400, overlap=80, respect_paragraphs), chunk_text(), estimate_tokens(). Paragraph-aware splitting with overlap. 9 tests.
+    - `memory/document_parser.rs`: DocumentFormat enum, detect_format(), extract_text() for PDF (pdf_extract), DOCX (zip+XML), Markdown, plain text. 11 tests.
+    - `memory/ingest.rs`: ingest_document() pipeline (parse -> chunk -> embed -> store). IngestResult struct.
+    - `tools/collection_tools.rs`: 4 rig Tools (create_knowledge_collection, list_knowledge_collections, delete_knowledge_collection, ingest_document). 11 tests.
+  - **Modified files**:
+    - `memory/long_term.rs`: Added `collection_id: Option<String>` to MemoryEntry, migration in create_table(), updated store() INSERT, new `recall_with_collection()` method for collection-filtered semantic search, `recall()` delegates to `recall_with_collection(None)`, fixed `collection_id` in recall query results to read from DB row
+    - `database/schema.rs`: Added knowledge_collections table + index
+    - `tools/subagents.rs`: 4 collection tools added to build_sub_agent_tools(), Knowledge Collections section in base_tools_prompt(), SearchMemoryTool::new() updated with db parameter
+    - `agent/mod.rs`: 4 collection tools added to create_tools(), SearchMemoryTool::new() updated with db parameter
+    - `tools/memory_tools.rs`: SearchMemoryTool now has `db: Option<Pool<Sqlite>>` field, SearchMemoryArgs has `collection: Option<String>`, `call()` resolves collection name -> collection_id via `collections::get_collection_by_name()` then uses `recall_with_collection()`, tool definition JSON includes `collection` parameter
+    - `Cargo.toml`: Added pdf-extract, zip, tempfile (dev)
+    - All MemoryEntry construction sites updated with `collection_id: None` (fact_extraction, summarization, memory_tools, commands/memory)
+  - **Architecture**: Per-instance scope, collection_id is optional foreign key on memory_entries, chunking uses token estimation heuristic (1.33 tokens/word), search_memory and add_memory tools support optional collection name filtering/assignment
+  - All 219 Rust tests pass, cargo build clean
+
+- **AddMemoryTool collection parameter (Post-Phase 4)**:
+  - **Problem**: `CreateKnowledgeCollectionTool` success message referenced `add_memory(collection="...")` but AddMemoryTool did not accept a `collection` parameter
+  - **Solution**: Added `collection: Option<String>` to `AddMemoryArgs` and `db: Option<Pool<Sqlite>>` to `AddMemoryTool`, following the exact same pattern as SearchMemoryTool's collection parameter
+  - **Files changed**: `tools/memory_tools.rs` (main change), `agent/mod.rs` (updated constructor call), `tools/subagents.rs` (updated constructor call), `tools/collection_tools.rs` (fixed success message format)
+  - All 219 Rust tests pass
+
 - **Background Fact Extraction (Post-Phase 4)**:
   - **Problem**: `extract_and_store_facts()` ran synchronously after each chat/streaming response, blocking the return of `stream_chat()`/`chat()`. This caused the frontend typing cursor to stay visible and events like `canvas:open_program` to be delayed until the LLM fact extraction API call + embedding computation completed.
   - **Solution**: Replaced blocking `extract_and_store_facts()` with `spawn_fact_extraction()` using `tokio::spawn`:

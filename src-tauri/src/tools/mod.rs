@@ -1,4 +1,5 @@
 pub mod code_generation;
+pub mod collection_tools;
 pub mod filesystem;
 pub mod memory_tools;
 pub mod planning;

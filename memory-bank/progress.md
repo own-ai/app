@@ -86,6 +86,12 @@
 - [x] Context builder: 3 recent summaries + semantically relevant older summary (threshold 0.6)
 - [x] Summary dates shown in context ("[YYYY-MM-DD] summary text")
 - [x] Memory deduplication: semantic similarity check (cosine >= 0.92) in `store()` prevents duplicate/near-duplicate entries
+- [x] Knowledge Collections: named topic-based grouping of memory entries (knowledge_collections table, collection_id on MemoryEntry)
+- [x] Document ingestion pipeline: PDF/DOCX/Markdown/text -> chunking -> embedding -> storage in collections
+- [x] 4 collection rig Tools: create_knowledge_collection, list_knowledge_collections, delete_knowledge_collection, ingest_document
+- [x] Collection tools available to both main agent and sub-agents
+- [x] Collection-filtered search: search_memory tool accepts optional `collection` parameter to search within a specific knowledge collection
+- [x] Collection-aware add_memory: add_memory tool accepts optional `collection` parameter to add entries directly to a knowledge collection
 
 ## What's Left to Build
 
