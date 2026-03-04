@@ -26,7 +26,7 @@ pub struct Message {
     pub role: String,
     pub content: String,
     pub timestamp: chrono::DateTime<chrono::Utc>,
-    pub importance_score: f32,  // NEW: 0.0-1.0, default 0.5
+    pub importance_score: Option<f32>,
 }
 
 // In long_term.rs - new struct for fact extraction

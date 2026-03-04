@@ -458,7 +458,7 @@ mod tests {
             role: role.to_string(),
             content: content.to_string(),
             timestamp: Utc::now(),
-            importance_score: 0.5,
+            importance_score: None,
         }
     }
 

@@ -261,7 +261,7 @@ CREATE TABLE messages (
     content TEXT NOT NULL,
     timestamp DATETIME NOT NULL,
     tokens_used INTEGER,
-    importance_score REAL DEFAULT 0.5,
+    importance_score REAL,
     summary_id TEXT,              -- References summaries.id
     metadata TEXT,                -- JSON for flexibility
     FOREIGN KEY (summary_id) REFERENCES summaries(id)

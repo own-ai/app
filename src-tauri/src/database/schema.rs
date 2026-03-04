@@ -12,7 +12,7 @@ pub async fn create_tables(pool: &Pool<Sqlite>) -> Result<()> {
             content TEXT NOT NULL,
             timestamp DATETIME NOT NULL,
             tokens_used INTEGER,
-            importance_score REAL DEFAULT 0.5,
+            importance_score REAL,
             metadata TEXT
         )
         "#,

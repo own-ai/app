@@ -608,8 +608,9 @@ impl OwnAIAgent {
             role: "user".to_string(),
             content: user_message.to_string(),
             timestamp: Utc::now(),
-            importance_score: 0.5,
+            importance_score: None,
         };
+        let user_msg_id = user_msg.id.clone();
         self.save_message_with_id(&user_msg.id, &user_msg.role, &user_msg.content)
             .await?;
 
@@ -671,7 +672,7 @@ impl OwnAIAgent {
             role: "agent".to_string(),
             content: response.clone(),
             timestamp: Utc::now(),
-            importance_score: 0.5,
+            importance_score: None,
         };
         let agent_msg_id = agent_msg.id.clone();
         self.save_message_with_id(&agent_msg.id, &agent_msg.role, &agent_msg.content)
@@ -679,7 +680,7 @@ impl OwnAIAgent {
         self.add_to_working_memory(agent_msg).await;
 
         // 8. Extract and store facts in long-term memory (background task)
-        self.spawn_fact_extraction(user_message, &response, &agent_msg_id);
+        self.spawn_fact_extraction(user_message, &response, &user_msg_id, &agent_msg_id);
 
         // Set completion attributes on parent span for Langfuse Input/Output display
         current_span.set_attribute("gen_ai.completion.0.role", "assistant");
@@ -731,8 +732,9 @@ impl OwnAIAgent {
             role: "user".to_string(),
             content: user_message.to_string(),
             timestamp: Utc::now(),
-            importance_score: 0.5,
+            importance_score: None,
         };
+        let user_msg_id = user_msg.id.clone();
         self.save_message_with_id(&user_msg.id, &user_msg.role, &user_msg.content)
             .await?;
         self.add_to_working_memory(user_msg).await;
@@ -789,11 +791,16 @@ impl OwnAIAgent {
             }
         }
 
-        // Record token usage from FinalResponse if available
+        // Record token usage from FinalResponse and persist to DB
         if let Some(ref res) = final_response {
             let usage = res.usage();
             current_span.set_attribute("gen_ai.usage.input_tokens", usage.input_tokens as i64);
             current_span.set_attribute("gen_ai.usage.output_tokens", usage.output_tokens as i64);
+
+            // Persist token counts: input_tokens on user message, output_tokens on agent message
+            if usage.input_tokens > 0 {
+                Self::update_tokens_used(&self.db, &user_msg_id, usage.input_tokens as i64).await;
+            }
         }
 
         // 6. Save agent response to DB first, then add to working memory
@@ -802,15 +809,23 @@ impl OwnAIAgent {
             role: "agent".to_string(),
             content: full_response.clone(),
             timestamp: Utc::now(),
-            importance_score: 0.5,
+            importance_score: None,
         };
         let agent_msg_id = agent_msg.id.clone();
         self.save_message_with_id(&agent_msg.id, &agent_msg.role, &agent_msg.content)
             .await?;
         self.add_to_working_memory(agent_msg).await;
 
+        // Persist output_tokens on agent message
+        if let Some(ref res) = final_response {
+            let usage = res.usage();
+            if usage.output_tokens > 0 {
+                Self::update_tokens_used(&self.db, &agent_msg_id, usage.output_tokens as i64).await;
+            }
+        }
+
         // 7. Extract and store facts in long-term memory (background task)
-        self.spawn_fact_extraction(user_message, &full_response, &agent_msg_id);
+        self.spawn_fact_extraction(user_message, &full_response, &user_msg_id, &agent_msg_id);
 
         // Set completion attributes on parent span for Langfuse Input/Output display
         current_span.set_attribute("gen_ai.completion.0.role", "assistant");
@@ -881,7 +896,7 @@ Remember: You are building a long-term relationship with this user."#,
     async fn load_recent_messages_from_db(db: &Pool<Sqlite>, limit: i32) -> Result<Vec<Message>> {
         let rows = sqlx::query(
             r#"
-            SELECT id, role, content, timestamp, COALESCE(importance_score, 0.5) as importance_score
+            SELECT id, role, content, timestamp, importance_score
             FROM messages
             ORDER BY timestamp ASC
             LIMIT ?
@@ -939,16 +954,63 @@ Remember: You are building a long-term relationship with this user."#,
         &self.tool_registry
     }
 
+    /// Helper: Update tokens_used on a message in the database.
+    /// Used after streaming to persist LLM token usage (input_tokens on user
+    /// message, output_tokens on agent message). Logs errors but does not fail.
+    async fn update_tokens_used(db: &Pool<Sqlite>, message_id: &str, tokens: i64) {
+        if let Err(e) = sqlx::query("UPDATE messages SET tokens_used = ? WHERE id = ?")
+            .bind(tokens)
+            .bind(message_id)
+            .execute(db)
+            .await
+        {
+            tracing::warn!(
+                "Failed to update tokens_used for message {}: {}",
+                message_id,
+                e
+            );
+        }
+    }
+
+    /// Helper: Update importance_score on a message in the database.
+    /// Called from fact extraction background task with the max importance
+    /// of all extracted facts. Logs errors but does not fail.
+    async fn update_importance_score(db: &Pool<Sqlite>, message_id: &str, score: f32) {
+        if let Err(e) = sqlx::query("UPDATE messages SET importance_score = ? WHERE id = ?")
+            .bind(score)
+            .bind(message_id)
+            .execute(db)
+            .await
+        {
+            tracing::warn!(
+                "Failed to update importance_score for message {}: {}",
+                message_id,
+                e
+            );
+        }
+    }
+
     /// Spawn fact extraction as a background task so it does not block
     /// the completion of chat/streaming. The task runs independently and
     /// logs any errors via tracing.
     ///
+    /// After extraction, sets the `importance_score` on the user message
+    /// to the maximum importance of all extracted facts.
+    ///
     /// Creates an instrumented tracing span so Langfuse can display the
     /// fact extraction as a named trace with Input/Output.
-    fn spawn_fact_extraction(&self, user_message: &str, agent_response: &str, agent_msg_id: &str) {
+    fn spawn_fact_extraction(
+        &self,
+        user_message: &str,
+        agent_response: &str,
+        user_msg_id: &str,
+        agent_msg_id: &str,
+    ) {
         let fact_extractor = self.fact_extractor.clone();
         let long_term_memory = self.context_builder.long_term_memory().clone();
+        let db = self.db.clone();
         let conversation_turn = format!("User: {}\nAgent: {}", user_message, agent_response);
+        let user_msg_id = user_msg_id.to_string();
         let agent_msg_id = agent_msg_id.to_string();
 
         // Create span before spawning so Langfuse context is attached
@@ -990,6 +1052,16 @@ Remember: You are building a long-term relationship with this user."#,
                         current_span.set_attribute("gen_ai.completion.0.role", "assistant");
                         current_span
                             .set_attribute("gen_ai.completion.0.content", facts_output.join("\n"));
+
+                        // Compute max importance from extracted facts for the user message
+                        let max_importance = extraction
+                            .facts
+                            .iter()
+                            .map(|f| f.importance)
+                            .fold(0.0_f32, f32::max);
+
+                        // Update importance_score on the user message
+                        Self::update_importance_score(&db, &user_msg_id, max_importance).await;
 
                         // Convert extracted facts to memory entries and store them
                         let mut mem = long_term_memory.lock().await;

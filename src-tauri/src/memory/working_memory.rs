@@ -8,7 +8,8 @@ pub struct Message {
     pub role: String,
     pub content: String,
     pub timestamp: chrono::DateTime<chrono::Utc>,
-    pub importance_score: f32, // 0.0-1.0, default 0.5
+    /// 0.0-1.0, None if not yet evaluated or no facts extracted
+    pub importance_score: Option<f32>,
 }
 
 /// Working Memory manages a rolling window of recent messages
@@ -155,7 +156,7 @@ mod tests {
             role: "user".to_string(),
             content: content.to_string(),
             timestamp: Utc::now(),
-            importance_score: 0.5,
+            importance_score: None,
         }
     }
 
@@ -165,7 +166,7 @@ mod tests {
             role: role.to_string(),
             content: content.to_string(),
             timestamp: Utc::now(),
-            importance_score: 0.5,
+            importance_score: None,
         }
     }
 
