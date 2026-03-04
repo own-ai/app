@@ -156,7 +156,7 @@ mod tests {
             .await
             .expect("Failed to create in-memory database");
 
-        crate::database::schema::create_tables(&pool)
+        crate::database::schema::run_migrations(&pool)
             .await
             .expect("Failed to create tables");
 

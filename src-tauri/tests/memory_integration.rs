@@ -68,10 +68,10 @@ async fn setup_test_db() -> SqlitePool {
         .await
         .expect("Failed to create in-memory database");
 
-    // Create base schema
-    schema::create_tables(&pool)
+    // Run migrations to create all tables
+    schema::run_migrations(&pool)
         .await
-        .expect("Failed to create tables");
+        .expect("Failed to run migrations");
 
     pool
 }

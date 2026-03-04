@@ -60,56 +60,7 @@ impl LongTermMemory {
 
         tracing::info!("Fastembed model loaded successfully");
 
-        // Ensure memory_entries table exists
-        Self::create_table(&db).await?;
-
         Ok(Self { embedder, db })
-    }
-
-    /// Create memory_entries table with vector storage
-    async fn create_table(db: &Pool<Sqlite>) -> Result<()> {
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS memory_entries (
-                id TEXT PRIMARY KEY,
-                content TEXT NOT NULL,
-                embedding BLOB NOT NULL,
-                entry_type TEXT NOT NULL,
-                importance REAL NOT NULL DEFAULT 0.5,
-                created_at DATETIME NOT NULL,
-                last_accessed DATETIME NOT NULL,
-                access_count INTEGER NOT NULL DEFAULT 0,
-                tags TEXT,  -- JSON array
-                source_message_ids TEXT  -- JSON array
-            )
-            "#,
-        )
-        .execute(db)
-        .await?;
-
-        // Create indices
-        sqlx::query("CREATE INDEX IF NOT EXISTS idx_memory_type ON memory_entries(entry_type)")
-            .execute(db)
-            .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_memory_importance ON memory_entries(importance DESC)",
-        )
-        .execute(db)
-        .await?;
-
-        // Migration: Add collection_id column if missing (for existing databases)
-        let _ = sqlx::query("ALTER TABLE memory_entries ADD COLUMN collection_id TEXT")
-            .execute(db)
-            .await;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_memory_collection ON memory_entries(collection_id)",
-        )
-        .execute(db)
-        .await?;
-
-        Ok(())
     }
 
     /// Similarity threshold for deduplication.

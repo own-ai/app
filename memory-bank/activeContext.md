@@ -69,6 +69,16 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 
 ## Recent Changes
 
+- **Database Migration System (Post-Phase 4)**:
+  - **Problem**: CREATE TABLE statements scattered across 4 files (schema.rs, long_term.rs, summarization.rs, collections.rs), ALTER TABLE "pseudo-migrations" running every startup, duplicate table definition for knowledge_collections
+  - **Solution**: Consolidated all schema into a single sqlx migration file, using `sqlx::migrate!()` macro for embedded compile-time migrations
+  - **New file**: `src-tauri/migrations/20260304162200_initial_schema.sql` -- single source of truth for all 11 tables (messages, summaries, memory_entries, knowledge_collections, user_profile, tools, tool_executions, programs, program_data, scheduled_tasks, ai_instances) with all columns in final form and all indexes
+  - **Rewritten**: `database/schema.rs` -- replaced `create_tables()` with `run_migrations()` using `sqlx::migrate!("./migrations")`
+  - **Removed**: `init_collections_table()` from `memory/collections.rs`, `init_table()` from `memory/summarization.rs`, `create_table()` from `memory/long_term.rs`, `summarization_agent.init_table().await?` from `agent/mod.rs`
+  - **Updated**: All test `setup_test_db()` functions across 9 files now use `run_migrations()` instead of manual CREATE TABLE statements
+  - **Architecture**: sqlx tracks applied migrations via `_sqlx_migrations` table; future schema changes go in new timestamped `.sql` files
+  - All 218 Rust tests pass, cargo build clean
+
 - **Langfuse Observability (Post-Phase 4)**:
   - **Purpose**: LLM call tracing via Langfuse OpenTelemetry integration for monitoring and debugging
   - **New files**:

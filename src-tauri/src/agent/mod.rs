@@ -281,9 +281,6 @@ impl OwnAIAgent {
             std::sync::Arc::new(tokio::sync::Mutex::new(long_term_memory));
         let summarization_agent = SummarizationAgent::new(db.clone());
 
-        // Initialize table if needed
-        summarization_agent.init_table().await?;
-
         // Load recent messages from database into working memory
         let recent_messages = Self::load_recent_messages_from_db(&db, 100).await?;
         if !recent_messages.is_empty() {

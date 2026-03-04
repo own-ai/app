@@ -834,7 +834,9 @@ mod tests {
             .connect("sqlite::memory:")
             .await
             .unwrap();
-        crate::database::schema::create_tables(&pool).await.unwrap();
+        crate::database::schema::run_migrations(&pool)
+            .await
+            .unwrap();
         let temp_dir = TempDir::new().unwrap();
         (pool, temp_dir)
     }

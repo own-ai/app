@@ -32,7 +32,7 @@
 - [x] OwnAIAgent with rig-core 0.30 (supports Anthropic, OpenAI, Ollama)
 - [x] Streaming chat via `agent:token` events with multi-turn support
 - [x] Multi-turn tool calling (MAX_TOOL_TURNS = 50)
-- [x] SQLite database with migrations (messages, user_profile, tools, tool_executions, programs; summaries + memory_entries created dynamically)
+- [x] SQLite database with sqlx migrations (`src-tauri/migrations/` -- single source of truth for all 11 tables)
 - [x] AI Instance Manager (create, list, update, delete instances)
 - [x] Per-instance databases at `~/.ownai/instances/{id}/ownai.db`
 - [x] API key storage via OS keychain (keyring crate)
@@ -114,7 +114,7 @@
 - [ ] Rhai script validation tests
 - [ ] Error handling improvements and user-friendly messages
 - [ ] Retry logic for LLM calls
-- [ ] Data migration system for schema updates
+- [x] Data migration system for schema updates (sqlx::migrate!() with `src-tauri/migrations/`)
 
 ### Phase 7 - Polish & Release
 - [ ] User documentation (EN + DE)

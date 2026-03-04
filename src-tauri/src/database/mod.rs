@@ -26,7 +26,7 @@ pub async fn init_database(instance_id: &str) -> Result<Pool<Sqlite>> {
         .context("Failed to connect to database")?;
 
     // Run migrations
-    schema::create_tables(&pool).await?;
+    schema::run_migrations(&pool).await?;
 
     tracing::info!("Database initialized for instance: {}", instance_id);
 

@@ -162,7 +162,9 @@ mod tests {
 
     async fn setup_test_db() -> Pool<Sqlite> {
         let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-        crate::database::schema::create_tables(&pool).await.unwrap();
+        crate::database::schema::run_migrations(&pool)
+            .await
+            .unwrap();
         pool
     }
 

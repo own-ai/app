@@ -62,6 +62,10 @@ ownAI is a Tauri 2.0 desktop application with a React frontend and a Rust backen
 - Simple backup (copy one file)
 - No cross-instance data leaks
 - Path: `~/.ownai/instances/{id}/ownai.db`
+- Schema managed via sqlx migrations (`src-tauri/migrations/`)
+- `sqlx::migrate!("./migrations")` embedded at compile time, tracks applied migrations via `_sqlx_migrations` table
+- Single initial migration `20260304162200_initial_schema.sql` defines all 11 tables
+- Future schema changes: add new timestamped `.sql` file to migrations directory
 
 ### 6. OS Keychain for API Keys
 - API keys stored securely via `keyring` crate

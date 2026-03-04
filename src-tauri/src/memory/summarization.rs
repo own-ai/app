@@ -80,51 +80,6 @@ impl SummarizationAgent {
         self.long_term_memory = Some(ltm);
     }
 
-    /// Initialize summaries table
-    pub async fn init_table(&self) -> Result<()> {
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS summaries (
-                id TEXT PRIMARY KEY,
-                start_message_id TEXT NOT NULL,
-                end_message_id TEXT NOT NULL,
-                summary_text TEXT NOT NULL,
-                key_facts TEXT NOT NULL,  -- JSON array
-                tools_mentioned TEXT,      -- JSON array
-                topics TEXT,               -- JSON array
-                timestamp DATETIME NOT NULL,
-                token_savings INTEGER,
-                FOREIGN KEY (start_message_id) REFERENCES messages(id),
-                FOREIGN KEY (end_message_id) REFERENCES messages(id)
-            )
-            "#,
-        )
-        .execute(&self.db)
-        .await?;
-
-        // Add summary_id column to messages if not exists
-        // Note: SQLite doesn't support ALTER TABLE ADD COLUMN IF NOT EXISTS directly
-        // We'll handle this gracefully
-        let _ =
-            sqlx::query("ALTER TABLE messages ADD COLUMN summary_id TEXT REFERENCES summaries(id)")
-                .execute(&self.db)
-                .await;
-
-        // Add embedding column to summaries if not exists (migration for existing DBs)
-        let _ = sqlx::query("ALTER TABLE summaries ADD COLUMN embedding BLOB")
-            .execute(&self.db)
-            .await;
-
-        // Create indices
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_summaries_timestamp ON summaries(timestamp DESC)",
-        )
-        .execute(&self.db)
-        .await?;
-
-        Ok(())
-    }
-
     /// Summarize evicted messages using the LLM extractor, save to database,
     /// and link messages to the created summary.
     ///
@@ -425,29 +380,16 @@ mod tests {
         }
     }
 
-    /// Helper: create an in-memory SQLite database with the messages table
+    /// Helper: create an in-memory SQLite database with all tables via migrations
     async fn setup_test_db() -> Pool<Sqlite> {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .connect("sqlite::memory:")
             .await
             .expect("Failed to create in-memory database");
 
-        // Create messages table (needed for foreign keys)
-        sqlx::query(
-            r#"
-            CREATE TABLE messages (
-                id TEXT PRIMARY KEY,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                timestamp DATETIME NOT NULL,
-                metadata TEXT,
-                summary_id TEXT
-            )
-            "#,
-        )
-        .execute(&pool)
-        .await
-        .expect("Failed to create messages table");
+        crate::database::schema::run_migrations(&pool)
+            .await
+            .expect("Failed to run migrations");
 
         pool
     }
@@ -492,19 +434,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_init_table() {
-        let db = setup_test_db().await;
-        let agent = SummarizationAgent::new(db);
-
-        let result = agent.init_table().await;
-        assert!(result.is_ok(), "init_table should succeed");
-    }
-
-    #[tokio::test]
     async fn test_save_and_retrieve_summary() {
         let db = setup_test_db().await;
         let agent = SummarizationAgent::new(db);
-        agent.init_table().await.unwrap();
 
         // Insert referenced messages first (for foreign key)
         insert_test_message_row(&agent.db, "msg_start").await;
@@ -532,7 +464,6 @@ mod tests {
     async fn test_count_summaries() {
         let db = setup_test_db().await;
         let agent = SummarizationAgent::new(db);
-        agent.init_table().await.unwrap();
 
         // Insert referenced messages
         for id in ["msg_start", "msg_end", "msg_start2", "msg_end2"] {
@@ -558,7 +489,6 @@ mod tests {
     async fn test_link_messages_to_summary() {
         let db = setup_test_db().await;
         let agent = SummarizationAgent::new(db);
-        agent.init_table().await.unwrap();
 
         // Create messages
         let msg_ids: Vec<String> = (0..3).map(|i| format!("msg_{}", i)).collect();
@@ -595,7 +525,6 @@ mod tests {
     async fn test_get_recent_summaries_ordering() {
         let db = setup_test_db().await;
         let agent = SummarizationAgent::new(db);
-        agent.init_table().await.unwrap();
 
         // Create messages for foreign keys
         for i in 0..6 {
@@ -624,7 +553,6 @@ mod tests {
     async fn test_summarize_and_save_with_mock_extractor() {
         let db = setup_test_db().await;
         let mut agent = SummarizationAgent::new(db);
-        agent.init_table().await.unwrap();
         agent.set_extractor(Box::new(MockExtractor));
 
         // Insert message rows into DB (for FK constraints)
@@ -676,7 +604,6 @@ mod tests {
     async fn test_summarize_and_save_without_extractor_fails() {
         let db = setup_test_db().await;
         let agent = SummarizationAgent::new(db);
-        agent.init_table().await.unwrap();
 
         let messages = vec![create_test_message("m1", "user", "Hello")];
 

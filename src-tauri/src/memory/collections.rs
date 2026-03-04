@@ -20,32 +20,6 @@ pub struct KnowledgeCollection {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Create the knowledge_collections table if it does not exist.
-pub async fn init_collections_table(db: &Pool<Sqlite>) -> Result<()> {
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS knowledge_collections (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL UNIQUE,
-            description TEXT NOT NULL DEFAULT '',
-            source TEXT,
-            document_count INTEGER NOT NULL DEFAULT 0,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL
-        )
-        "#,
-    )
-    .execute(db)
-    .await
-    .context("Failed to create knowledge_collections table")?;
-
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_collections_name ON knowledge_collections(name)")
-        .execute(db)
-        .await?;
-
-    Ok(())
-}
-
 /// Create a new knowledge collection.
 pub async fn create_collection(
     db: &Pool<Sqlite>,
@@ -256,29 +230,10 @@ mod tests {
             .await
             .expect("Failed to create in-memory database");
 
-        // Create the memory_entries table (needed for delete_collection)
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS memory_entries (
-                id TEXT PRIMARY KEY,
-                content TEXT NOT NULL,
-                embedding BLOB NOT NULL,
-                entry_type TEXT NOT NULL,
-                importance REAL NOT NULL DEFAULT 0.5,
-                created_at DATETIME NOT NULL,
-                last_accessed DATETIME NOT NULL,
-                access_count INTEGER NOT NULL DEFAULT 0,
-                tags TEXT,
-                source_message_ids TEXT,
-                collection_id TEXT
-            )
-            "#,
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
+        crate::database::schema::run_migrations(&pool)
+            .await
+            .expect("Failed to run migrations");
 
-        init_collections_table(&pool).await.unwrap();
         pool
     }
 
