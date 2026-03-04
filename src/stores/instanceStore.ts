@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   AIInstance,
   CreateInstanceRequest,
+  LangfuseConfig,
   ProviderInfo,
   ProviderType,
 } from "@/types";
@@ -24,6 +25,16 @@ interface InstanceStore {
   saveApiKey: (provider: ProviderType, apiKey: string) => Promise<void>;
   deleteApiKey: (provider: ProviderType) => Promise<void>;
   hasApiKey: (provider: ProviderType) => Promise<boolean>;
+
+  // Langfuse Observability
+  langfuseConfig: LangfuseConfig | null;
+  saveLangfuseConfig: (
+    publicKey: string,
+    secretKey: string,
+    host: string,
+  ) => Promise<void>;
+  loadLangfuseConfig: () => Promise<void>;
+  deleteLangfuseConfig: () => Promise<void>;
 }
 
 export const useInstanceStore = create<InstanceStore>((set, get) => ({
@@ -149,6 +160,42 @@ export const useInstanceStore = create<InstanceStore>((set, get) => ({
     } catch (error) {
       console.error("Failed to check API key:", error);
       return false;
+    }
+  },
+
+  // Langfuse Observability
+  langfuseConfig: null,
+
+  saveLangfuseConfig: async (
+    publicKey: string,
+    secretKey: string,
+    host: string,
+  ) => {
+    try {
+      await invoke("save_langfuse_config", { publicKey, secretKey, host });
+      await get().loadLangfuseConfig();
+    } catch (error) {
+      console.error("Failed to save Langfuse config:", error);
+      throw error;
+    }
+  },
+
+  loadLangfuseConfig: async () => {
+    try {
+      const config = await invoke<LangfuseConfig>("get_langfuse_config");
+      set({ langfuseConfig: config });
+    } catch (error) {
+      console.error("Failed to load Langfuse config:", error);
+    }
+  },
+
+  deleteLangfuseConfig: async () => {
+    try {
+      await invoke("delete_langfuse_config");
+      await get().loadLangfuseConfig();
+    } catch (error) {
+      console.error("Failed to delete Langfuse config:", error);
+      throw error;
     }
   },
 }));

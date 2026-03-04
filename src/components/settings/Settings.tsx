@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { X, Key, Check, Trash2, Eye, EyeOff } from "lucide-react";
+import { X, Key, Check, Trash2, Eye, EyeOff, Activity } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { IconButton } from "@/components/ui/IconButton";
@@ -13,15 +13,24 @@ interface SettingsProps {
 
 export const Settings = ({ isOpen, onClose }: SettingsProps) => {
   const { t } = useTranslation();
-  const { providers, loadProviders, saveApiKey, deleteApiKey } =
-    useInstanceStore();
+  const {
+    providers,
+    loadProviders,
+    saveApiKey,
+    deleteApiKey,
+    langfuseConfig,
+    loadLangfuseConfig,
+    saveLangfuseConfig,
+    deleteLangfuseConfig,
+  } = useInstanceStore();
 
-  // Load providers when settings opens
+  // Load providers and Langfuse config when settings opens
   useEffect(() => {
     if (isOpen) {
       loadProviders();
+      loadLangfuseConfig();
     }
-  }, [isOpen, loadProviders]);
+  }, [isOpen, loadProviders, loadLangfuseConfig]);
 
   if (!isOpen) return null;
 
@@ -67,6 +76,24 @@ export const Settings = ({ isOpen, onClose }: SettingsProps) => {
                     />
                   ))}
               </div>
+            </section>
+
+            {/* Langfuse Observability Section */}
+            <section className="mt-8 pt-8 border-t border-border">
+              <h3 className="text-lg font-medium mb-4 flex items-center gap-2">
+                <Activity className="w-5 h-5" />
+                {t("settings.langfuse_title")}
+              </h3>
+              <p className="text-sm text-muted mb-4">
+                {t("settings.langfuse_description")}
+              </p>
+
+              <LangfuseConfigSection
+                hasKeys={langfuseConfig?.has_keys ?? false}
+                host={langfuseConfig?.host ?? "https://cloud.langfuse.com"}
+                onSave={saveLangfuseConfig}
+                onDelete={deleteLangfuseConfig}
+              />
             </section>
           </div>
         </div>
@@ -197,6 +224,215 @@ const APIKeyRow = ({
           </Button>
 
           {hasKey && (
+            <IconButton
+              icon={Trash2}
+              label={t("common.delete")}
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface LangfuseConfigSectionProps {
+  hasKeys: boolean;
+  host: string;
+  onSave: (publicKey: string, secretKey: string, host: string) => Promise<void>;
+  onDelete: () => Promise<void>;
+}
+
+const LangfuseConfigSection = ({
+  hasKeys,
+  host,
+  onSave,
+  onDelete,
+}: LangfuseConfigSectionProps) => {
+  const { t } = useTranslation();
+  const [isEditing, setIsEditing] = useState(false);
+  const [publicKey, setPublicKey] = useState("");
+  const [secretKey, setSecretKey] = useState("");
+  const [hostValue, setHostValue] = useState(host);
+  const [showPublicKey, setShowPublicKey] = useState(false);
+  const [showSecretKey, setShowSecretKey] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSave = async () => {
+    if (!publicKey.trim() || !secretKey.trim()) {
+      setError(t("settings.langfuse_keys_empty"));
+      return;
+    }
+
+    setIsSaving(true);
+    setError("");
+
+    try {
+      await onSave(publicKey.trim(), secretKey.trim(), hostValue.trim());
+      setPublicKey("");
+      setSecretKey("");
+      setIsEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setIsDeleting(true);
+    setError("");
+
+    try {
+      await onDelete();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setPublicKey("");
+    setSecretKey("");
+    setHostValue(host);
+    setIsEditing(false);
+    setError("");
+  };
+
+  return (
+    <div className="border border-border rounded-lg p-4">
+      <div className="flex items-center justify-between mb-2">
+        <span className="font-medium">Langfuse</span>
+        {hasKeys && !isEditing && (
+          <span className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400">
+            <Check className="w-4 h-4" />
+            {t("settings.langfuse_configured")}
+          </span>
+        )}
+      </div>
+
+      {hasKeys && !isEditing && (
+        <p className="text-sm text-muted mb-3">
+          {t("settings.langfuse_host")}: {host}
+        </p>
+      )}
+
+      {isEditing ? (
+        <div className="space-y-3">
+          {/* Public Key */}
+          <div>
+            <label className="text-sm text-muted mb-1 block">
+              {t("settings.langfuse_public_key")}
+            </label>
+            <div className="relative">
+              <Input
+                type={showPublicKey ? "text" : "password"}
+                value={publicKey}
+                onChange={(e) => setPublicKey(e.target.value)}
+                placeholder="pk-lf-..."
+                disabled={isSaving}
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={() => setShowPublicKey(!showPublicKey)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground"
+              >
+                {showPublicKey ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Secret Key */}
+          <div>
+            <label className="text-sm text-muted mb-1 block">
+              {t("settings.langfuse_secret_key")}
+            </label>
+            <div className="relative">
+              <Input
+                type={showSecretKey ? "text" : "password"}
+                value={secretKey}
+                onChange={(e) => setSecretKey(e.target.value)}
+                placeholder="sk-lf-..."
+                disabled={isSaving}
+              />
+              <button
+                type="button"
+                onClick={() => setShowSecretKey(!showSecretKey)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground"
+              >
+                {showSecretKey ? (
+                  <EyeOff className="w-4 h-4" />
+                ) : (
+                  <Eye className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Host URL */}
+          <div>
+            <label className="text-sm text-muted mb-1 block">
+              {t("settings.langfuse_host")}
+            </label>
+            <Input
+              type="url"
+              value={hostValue}
+              onChange={(e) => setHostValue(e.target.value)}
+              placeholder="https://cloud.langfuse.com"
+              disabled={isSaving}
+            />
+            <p className="text-xs text-muted mt-1">
+              {t("settings.langfuse_host_hint")}
+            </p>
+          </div>
+
+          {/* Restart hint */}
+          <p className="text-xs text-muted">
+            {t("settings.langfuse_restart_hint")}
+          </p>
+
+          {error && (
+            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+          )}
+
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={handleSave}
+              isLoading={isSaving}
+              disabled={!publicKey.trim() || !secretKey.trim() || isSaving}
+            >
+              {t("common.save")}
+            </Button>
+            <Button variant="ghost" onClick={handleCancel} disabled={isSaving}>
+              {t("common.cancel")}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setHostValue(host);
+              setIsEditing(true);
+            }}
+          >
+            {hasKeys
+              ? t("settings.langfuse_change")
+              : t("settings.langfuse_add")}
+          </Button>
+
+          {hasKeys && (
             <IconButton
               icon={Trash2}
               label={t("common.delete")}

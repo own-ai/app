@@ -53,6 +53,12 @@ export interface Program {
 
 export type CanvasViewMode = "chat" | "split" | "canvas";
 
+// Langfuse Configuration
+export interface LangfuseConfig {
+  has_keys: boolean;
+  host: string;
+}
+
 // Scheduled Task Types
 export interface ScheduledTask {
   id: string;

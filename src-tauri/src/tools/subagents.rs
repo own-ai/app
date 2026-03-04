@@ -14,6 +14,8 @@ use serde_json::json;
 use sqlx::{Pool, Sqlite};
 use std::path::PathBuf;
 use tauri::AppHandle;
+use tracing::Instrument;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::canvas::tools::{
     CreateProgramTool, ListProgramsTool, OpenProgramTool, ProgramEditFileTool, ProgramLsTool,
@@ -386,6 +388,8 @@ pub struct DelegateTaskTool {
     model: String,
     #[serde(skip, default = "default_instance_id")]
     instance_id: String,
+    #[serde(skip, default)]
+    instance_name: String,
     #[serde(skip)]
     registry: Option<SharedRegistry>,
     #[serde(skip)]
@@ -413,6 +417,7 @@ impl DelegateTaskTool {
         client: ClientProvider,
         model: String,
         instance_id: String,
+        instance_name: String,
         registry: SharedRegistry,
         db: Pool<Sqlite>,
         programs_root: PathBuf,
@@ -423,6 +428,7 @@ impl DelegateTaskTool {
             client: Some(client),
             model,
             instance_id,
+            instance_name,
             registry: Some(registry),
             db: Some(db),
             programs_root: Some(programs_root),
@@ -442,7 +448,46 @@ impl DelegateTaskTool {
     }
 
     /// Run a sub-agent task with the given system prompt and task description.
+    ///
+    /// Creates an instrumented tracing span so Langfuse can display the
+    /// sub-agent execution as a named trace with Input/Output.
     async fn run_sub_agent(
+        &self,
+        system_prompt: &str,
+        task: &str,
+        task_name: &str,
+    ) -> Result<String, SubAgentError> {
+        let sub_agent_span = tracing::info_span!(
+            "ownai.sub_agent",
+            instance_id = %self.instance_id,
+            task_name = task_name,
+        );
+        if let Some(ctx) =
+            crate::observability::langfuse_context(&self.instance_id, &self.instance_name)
+        {
+            for attr in ctx.get_attributes() {
+                sub_agent_span.set_attribute(attr.key, attr.value);
+            }
+        }
+        sub_agent_span.set_attribute("gen_ai.operation.name", "sub_agent");
+        sub_agent_span.set_attribute("gen_ai.prompt.0.role", "user");
+        sub_agent_span.set_attribute("gen_ai.prompt.0.content", task.to_string());
+
+        let result = self
+            .run_sub_agent_inner(system_prompt, task, task_name)
+            .instrument(sub_agent_span.clone())
+            .await;
+
+        if let Ok(ref output) = result {
+            sub_agent_span.set_attribute("gen_ai.completion.0.role", "assistant");
+            sub_agent_span.set_attribute("gen_ai.completion.0.content", output.clone());
+        }
+
+        result
+    }
+
+    /// Inner implementation of `run_sub_agent`, executed within an instrumented span.
+    async fn run_sub_agent_inner(
         &self,
         system_prompt: &str,
         task: &str,
@@ -632,6 +677,7 @@ mod tests {
             client: None,
             model: String::new(),
             instance_id: String::new(),
+            instance_name: String::new(),
             registry: None,
             db: None,
             programs_root: None,
@@ -653,6 +699,7 @@ mod tests {
             client: None,
             model: String::new(),
             instance_id: String::new(),
+            instance_name: String::new(),
             registry: None,
             db: None,
             programs_root: None,

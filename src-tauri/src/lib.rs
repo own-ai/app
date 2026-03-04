@@ -5,6 +5,7 @@ pub mod canvas;
 pub mod commands;
 pub mod database;
 pub mod memory;
+pub mod observability;
 pub mod scheduler;
 pub mod tools;
 pub mod utils;
@@ -19,8 +20,8 @@ use utils::paths;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Initialize logging
-    tracing_subscriber::fmt::init();
+    // Initialize logging (with optional Langfuse observability)
+    observability::init_tracing();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -186,6 +187,10 @@ pub fn run() {
             commands::scheduler::list_scheduled_tasks,
             commands::scheduler::delete_scheduled_task,
             commands::scheduler::toggle_scheduled_task,
+            // Langfuse Observability
+            commands::langfuse::save_langfuse_config,
+            commands::langfuse::get_langfuse_config,
+            commands::langfuse::delete_langfuse_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

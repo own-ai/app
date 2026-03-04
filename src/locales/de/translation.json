@@ -64,7 +64,18 @@
     "api_key_change": "API-Schlüssel ändern",
     "api_key_placeholder": "Gib deinen {{provider}}-API-Schlüssel ein",
     "api_key_empty": "Bitte gib einen API-Schlüssel ein",
-    "about": "Über"
+    "about": "Über",
+    "langfuse_title": "Langfuse-Verbindung",
+    "langfuse_description": "Verbinde dich mit Langfuse, um LLM-Aufrufe zu tracen und zu beobachten. Zugangsdaten werden sicher in deinem System-Schlüsselbund gespeichert.",
+    "langfuse_configured": "Konfiguriert",
+    "langfuse_public_key": "Public Key",
+    "langfuse_secret_key": "Secret Key",
+    "langfuse_host": "Host",
+    "langfuse_host_hint": "Leer lassen für Langfuse Cloud (cloud.langfuse.com). Für selbst-gehostete Instanzen setzen.",
+    "langfuse_keys_empty": "Bitte gib sowohl Public Key als auch Secret Key ein",
+    "langfuse_add": "Langfuse konfigurieren",
+    "langfuse_change": "Konfiguration ändern",
+    "langfuse_restart_hint": "Änderungen erfordern einen Neustart der App."
   },
   "canvas": {
     "programs": "Programme",

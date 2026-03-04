@@ -12,6 +12,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
+use tracing::Instrument;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::ai_instances::{AIInstance, AIInstanceManager, APIKeyStorage, LLMProvider};
 use crate::database::init_database;
@@ -271,8 +273,27 @@ async fn execute_task(
         base_tools_prompt()
     );
 
-    // 6. Create and run provider-specific agent
-    let result = run_task_agent(&instance, &api_key, &system_prompt, task_prompt, tools).await?;
+    // 6. Create and run provider-specific agent with Langfuse tracing
+    let task_span = tracing::info_span!(
+        "ownai.scheduled_task",
+        instance_id = instance_id,
+        instance_name = %instance.name,
+    );
+    if let Some(ctx) = crate::observability::langfuse_context(instance_id, &instance.name) {
+        for attr in ctx.get_attributes() {
+            task_span.set_attribute(attr.key, attr.value);
+        }
+    }
+    task_span.set_attribute("gen_ai.operation.name", "scheduled_task");
+    task_span.set_attribute("gen_ai.prompt.0.role", "user");
+    task_span.set_attribute("gen_ai.prompt.0.content", task_prompt.to_string());
+
+    let result = run_task_agent(&instance, &api_key, &system_prompt, task_prompt, tools)
+        .instrument(task_span.clone())
+        .await?;
+
+    task_span.set_attribute("gen_ai.completion.0.role", "assistant");
+    task_span.set_attribute("gen_ai.completion.0.content", result.clone());
 
     Ok(result)
 }

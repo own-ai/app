@@ -49,7 +49,7 @@
 - [x] Path utilities for cross-platform file management
 - [x] Workspace directory per instance at `~/.ownai/instances/{id}/workspace/`
 - [x] Programs directory per instance at `~/.ownai/instances/{id}/programs/`
-- [x] Tracing/logging setup
+- [x] Tracing/logging setup with optional Langfuse observability (opentelemetry-langfuse)
 - [x] Native OS notifications via tauri-plugin-notification (Rhai send_notification + Canvas Bridge notify)
 - [x] Sandboxed Rhai scripting engine (14 safe functions, security limits)
 - [x] Tool Registry (RhaiToolRegistry with SQLite, AST caching, execution logging, usage stats)
@@ -92,6 +92,10 @@
 - [x] Collection tools available to both main agent and sub-agents
 - [x] Collection-filtered search: search_memory tool accepts optional `collection` parameter to search within a specific knowledge collection
 - [x] Collection-aware add_memory: add_memory tool accepts optional `collection` parameter to add entries directly to a knowledge collection
+- [x] Langfuse observability: Optional OpenTelemetry tracing to Langfuse with credentials in OS keychain
+- [x] Langfuse Settings UI: Public key, secret key, host configuration in Settings panel
+- [x] Agent `.name()` set on all provider builders for proper Langfuse trace naming
+- [x] LangfuseContext helper with session_id, tags, metadata for trace enrichment
 
 ## What's Left to Build
 

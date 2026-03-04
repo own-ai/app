@@ -69,6 +69,24 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 
 ## Recent Changes
 
+- **Langfuse Observability (Post-Phase 4)**:
+  - **Purpose**: LLM call tracing via Langfuse OpenTelemetry integration for monitoring and debugging
+  - **New files**:
+    - `ai_instances/langfuse.rs`: LangfuseKeyStorage (public key, secret key, host in OS keychain)
+    - `commands/langfuse.rs`: 3 Tauri commands (save_langfuse_config, get_langfuse_config, delete_langfuse_config)
+    - `observability.rs`: init_tracing() with conditional Langfuse pipeline, langfuse_context() helper
+  - **Modified files**:
+    - `ai_instances/mod.rs`: Exports langfuse module + LangfuseKeyStorage
+    - `commands/mod.rs`: Exports langfuse module
+    - `lib.rs`: Uses observability::init_tracing() instead of tracing_subscriber::fmt::init(), registers 3 Langfuse commands (34 total now)
+    - `agent/mod.rs`: Added `.name(&instance.name)` to all 3 provider agent builders for proper naming in Langfuse traces
+    - `Settings.tsx`: New LangfuseConfigSection component (public key, secret key, host inputs, restart hint)
+    - `instanceStore.ts`: langfuseConfig state + saveLangfuseConfig/loadLangfuseConfig/deleteLangfuseConfig actions
+    - `types/index.ts`: LangfuseConfig interface
+    - Translation files (EN + DE): 12 new settings.langfuse_* keys
+  - **Crates added**: opentelemetry-langfuse 0.6.1, opentelemetry 0.31.0, opentelemetry_sdk 0.31.0, tracing-opentelemetry 0.32.1
+  - **Architecture**: Credentials in OS keychain (not env vars), app restart required for changes, conditional init (Langfuse or console-only), BatchSpanProcessor with Tokio async runtime, LangfuseContext with session_id=instance_id, tags=[environment], metadata includes version/os/arch/instance_name
+
 - **Knowledge Collections & Document Ingestion (Post-Phase 4)**:
   - **Purpose**: Organize domain-specific knowledge by topic with automatic document ingestion
   - **New files**:

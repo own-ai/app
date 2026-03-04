@@ -15,6 +15,8 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
+use tracing::Instrument;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::ai_instances::{AIInstance, APIKeyStorage, LLMProvider};
 use crate::canvas::tools::{
@@ -44,8 +46,9 @@ use crate::utils::paths;
 
 /// Macro to process streaming responses uniformly across providers.
 /// Handles both text chunks and multi-turn tool call items.
+/// Captures the `FinalResponse` (if any) so callers can extract token usage.
 macro_rules! process_stream {
-    ($stream:expr, $callback:expr, $full_response:expr) => {
+    ($stream:expr, $callback:expr, $full_response:expr, $final_response:expr) => {
         while let Some(result) = $stream.next().await {
             match result {
                 Ok(item) => match item {
@@ -60,8 +63,8 @@ macro_rules! process_stream {
                     MultiTurnStreamItem::StreamUserItem(_) => {
                         // Tool result sent back (multi-turn); stream continues
                     }
-                    MultiTurnStreamItem::FinalResponse(_) => {
-                        // Final aggregated response; stream is done
+                    MultiTurnStreamItem::FinalResponse(res) => {
+                        $final_response = Some(res);
                     }
                     _ => {} // Future variants
                 },
@@ -79,6 +82,7 @@ macro_rules! process_stream {
 #[allow(clippy::too_many_arguments)]
 fn create_tools(
     instance_id: &str,
+    instance_name: &str,
     todo_list: SharedTodoList,
     registry: SharedRegistry,
     available_dynamic_tools: Vec<(String, String)>,
@@ -147,6 +151,7 @@ fn create_tools(
             client_provider,
             model,
             instance_id.to_string(),
+            instance_name.to_string(),
             registry,
             db.clone(),
             programs_root,
@@ -250,6 +255,11 @@ pub struct OwnAIAgent {
     #[allow(dead_code)]
     todo_list: SharedTodoList,
     tool_registry: SharedRegistry,
+    instance_id: String,
+    instance_name: String,
+    provider_name: String,
+    model: String,
+    system_prompt: String,
 }
 
 /// Maximum number of multi-turn iterations for tool calling
@@ -333,6 +343,7 @@ impl OwnAIAgent {
 
                 let tools = create_tools(
                     &instance.id,
+                    &instance.name,
                     todo_list.clone(),
                     tool_registry.clone(),
                     available_dynamic_tools.clone(),
@@ -349,6 +360,7 @@ impl OwnAIAgent {
                     .preamble(&system_prompt)
                     .max_tokens(32768)
                     .temperature(0.7)
+                    .name(&instance.name)
                     .tools(tools)
                     .build();
 
@@ -377,6 +389,7 @@ impl OwnAIAgent {
 
                 let tools = create_tools(
                     &instance.id,
+                    &instance.name,
                     todo_list.clone(),
                     tool_registry.clone(),
                     available_dynamic_tools.clone(),
@@ -394,6 +407,7 @@ impl OwnAIAgent {
                     .agent(&instance.model)
                     .preamble(&system_prompt)
                     .temperature(0.7)
+                    .name(&instance.name)
                     .tools(tools)
                     .build();
 
@@ -430,6 +444,7 @@ impl OwnAIAgent {
 
                 let tools = create_tools(
                     &instance.id,
+                    &instance.name,
                     todo_list.clone(),
                     tool_registry.clone(),
                     available_dynamic_tools.clone(),
@@ -445,6 +460,7 @@ impl OwnAIAgent {
                     .clone()
                     .agent(&instance.model)
                     .preamble(&system_prompt)
+                    .name(&instance.name)
                     .tools(tools)
                     .build();
 
@@ -482,6 +498,11 @@ impl OwnAIAgent {
             db,
             todo_list,
             tool_registry,
+            instance_id: instance.id.clone(),
+            instance_name: instance.name.clone(),
+            provider_name: instance.provider.to_string(),
+            model: instance.model.clone(),
+            system_prompt,
         })
     }
 
@@ -490,18 +511,57 @@ impl OwnAIAgent {
         &self.context_builder
     }
 
+    /// Attach Langfuse context attributes (session, tags, metadata) to a tracing span.
+    ///
+    /// Uses `OpenTelemetrySpanExt` to set the attributes from `LangfuseContext`
+    /// on the given span. No-op if Langfuse is not configured.
+    fn attach_langfuse_context(&self, span: &tracing::Span) {
+        if let Some(ctx) =
+            crate::observability::langfuse_context(&self.instance_id, &self.instance_name)
+        {
+            for attr in ctx.get_attributes() {
+                span.set_attribute(attr.key, attr.value);
+            }
+        }
+    }
+
     /// Summarize evicted messages using the LLM extractor and save to database.
     /// Delegates to `SummarizationAgent::summarize_and_save` which handles
     /// LLM extraction, persistence, and message linking.
+    ///
+    /// Creates an instrumented tracing span so Langfuse can display the
+    /// summarization as a named trace with Input/Output.
     async fn summarize_evicted(&self, evicted: Vec<Message>) -> Result<()> {
         if evicted.is_empty() {
             return Ok(());
         }
 
-        self.context_builder
+        // Create span with Langfuse context and GenAI attributes
+        let summarize_span = tracing::info_span!(
+            "ownai.summarization",
+            instance_id = %self.instance_id,
+            instance_name = %self.instance_name,
+        );
+        self.attach_langfuse_context(&summarize_span);
+
+        let input_text = evicted
+            .iter()
+            .map(|m| format!("{}: {}", m.role, m.content))
+            .collect::<Vec<_>>()
+            .join("\n");
+        summarize_span.set_attribute("gen_ai.operation.name", "summarization");
+        summarize_span.set_attribute("gen_ai.prompt.0.role", "user");
+        summarize_span.set_attribute("gen_ai.prompt.0.content", input_text);
+
+        let summary = self
+            .context_builder
             .summarization_agent()
             .summarize_and_save(&evicted)
+            .instrument(summarize_span.clone())
             .await?;
+
+        summarize_span.set_attribute("gen_ai.completion.0.role", "assistant");
+        summarize_span.set_attribute("gen_ai.completion.0.content", summary.summary_text);
 
         Ok(())
     }
@@ -515,8 +575,33 @@ impl OwnAIAgent {
         }
     }
 
-    /// Main chat method (non-streaming) - combines Memory + Tools + LLM
+    /// Main chat method (non-streaming) - combines Memory + Tools + LLM.
+    ///
+    /// Creates an instrumented tracing span with Langfuse context attributes
+    /// so that all LLM calls within this chat turn are associated with the
+    /// correct session, tags, and metadata in Langfuse.
     pub async fn chat(&mut self, user_message: &str) -> Result<String> {
+        let chat_span = tracing::info_span!(
+            "ownai.chat",
+            instance_id = %self.instance_id,
+            instance_name = %self.instance_name,
+        );
+        self.attach_langfuse_context(&chat_span);
+        self.chat_inner(user_message).instrument(chat_span).await
+    }
+
+    /// Inner implementation of `chat()`, executed within an instrumented span.
+    async fn chat_inner(&mut self, user_message: &str) -> Result<String> {
+        // Set GenAI semantic convention attributes on the parent span so that
+        // Langfuse can display Input/Output and render the flow diagram.
+        let current_span = tracing::Span::current();
+        current_span.set_attribute("gen_ai.operation.name", "chat");
+        current_span.set_attribute("gen_ai.provider.name", self.provider_name.clone());
+        current_span.set_attribute("gen_ai.request.model", self.model.clone());
+        current_span.set_attribute("gen_ai.system_instructions", self.system_prompt.clone());
+        current_span.set_attribute("gen_ai.prompt.0.role", "user");
+        current_span.set_attribute("gen_ai.prompt.0.content", user_message.to_string());
+
         // 1. Create user message, save to DB first (so FK constraints work for summaries)
         let user_msg = Message {
             id: uuid::Uuid::new_v4().to_string(),
@@ -596,15 +681,50 @@ impl OwnAIAgent {
         // 8. Extract and store facts in long-term memory (background task)
         self.spawn_fact_extraction(user_message, &response, &agent_msg_id);
 
+        // Set completion attributes on parent span for Langfuse Input/Output display
+        current_span.set_attribute("gen_ai.completion.0.role", "assistant");
+        current_span.set_attribute("gen_ai.completion.0.content", response.clone());
+
         Ok(response)
     }
 
-    /// Stream chat response with tool support
+    /// Stream chat response with tool support.
+    ///
+    /// Creates an instrumented tracing span with Langfuse context attributes
+    /// so that all LLM calls within this streaming turn are associated with the
+    /// correct session, tags, and metadata in Langfuse.
     pub async fn stream_chat(
+        &mut self,
+        user_message: &str,
+        callback: impl FnMut(String) + Send + 'static,
+    ) -> Result<String> {
+        let stream_span = tracing::info_span!(
+            "ownai.stream_chat",
+            instance_id = %self.instance_id,
+            instance_name = %self.instance_name,
+        );
+        self.attach_langfuse_context(&stream_span);
+        self.stream_chat_inner(user_message, callback)
+            .instrument(stream_span)
+            .await
+    }
+
+    /// Inner implementation of `stream_chat()`, executed within an instrumented span.
+    async fn stream_chat_inner(
         &mut self,
         user_message: &str,
         mut callback: impl FnMut(String) + Send + 'static,
     ) -> Result<String> {
+        // Set GenAI semantic convention attributes on the parent span so that
+        // Langfuse can display Input/Output and render the flow diagram.
+        let current_span = tracing::Span::current();
+        current_span.set_attribute("gen_ai.operation.name", "chat");
+        current_span.set_attribute("gen_ai.provider.name", self.provider_name.clone());
+        current_span.set_attribute("gen_ai.request.model", self.model.clone());
+        current_span.set_attribute("gen_ai.system_instructions", self.system_prompt.clone());
+        current_span.set_attribute("gen_ai.prompt.0.role", "user");
+        current_span.set_attribute("gen_ai.prompt.0.content", user_message.to_string());
+
         // 1. Save user message to DB first, then add to working memory
         let user_msg = Message {
             id: uuid::Uuid::new_v4().to_string(),
@@ -643,6 +763,7 @@ impl OwnAIAgent {
 
         // 5. Stream with multi-turn tool calling support
         let mut full_response = String::new();
+        let mut final_response: Option<rig::agent::FinalResponse> = None;
 
         match &self.agent {
             AgentProvider::Anthropic(agent) => {
@@ -650,22 +771,29 @@ impl OwnAIAgent {
                     .stream_chat(&prompt, history)
                     .multi_turn(MAX_TOOL_TURNS)
                     .await;
-                process_stream!(stream, callback, full_response);
+                process_stream!(stream, callback, full_response, final_response);
             }
             AgentProvider::OpenAI(agent) => {
                 let mut stream = agent
                     .stream_chat(&prompt, history)
                     .multi_turn(MAX_TOOL_TURNS)
                     .await;
-                process_stream!(stream, callback, full_response);
+                process_stream!(stream, callback, full_response, final_response);
             }
             AgentProvider::Ollama(agent) => {
                 let mut stream = agent
                     .stream_chat(&prompt, history)
                     .multi_turn(MAX_TOOL_TURNS)
                     .await;
-                process_stream!(stream, callback, full_response);
+                process_stream!(stream, callback, full_response, final_response);
             }
+        }
+
+        // Record token usage from FinalResponse if available
+        if let Some(ref res) = final_response {
+            let usage = res.usage();
+            current_span.set_attribute("gen_ai.usage.input_tokens", usage.input_tokens as i64);
+            current_span.set_attribute("gen_ai.usage.output_tokens", usage.output_tokens as i64);
         }
 
         // 6. Save agent response to DB first, then add to working memory
@@ -683,6 +811,10 @@ impl OwnAIAgent {
 
         // 7. Extract and store facts in long-term memory (background task)
         self.spawn_fact_extraction(user_message, &full_response, &agent_msg_id);
+
+        // Set completion attributes on parent span for Langfuse Input/Output display
+        current_span.set_attribute("gen_ai.completion.0.role", "assistant");
+        current_span.set_attribute("gen_ai.completion.0.content", full_response.clone());
 
         Ok(full_response)
     }
@@ -810,42 +942,73 @@ Remember: You are building a long-term relationship with this user."#,
     /// Spawn fact extraction as a background task so it does not block
     /// the completion of chat/streaming. The task runs independently and
     /// logs any errors via tracing.
+    ///
+    /// Creates an instrumented tracing span so Langfuse can display the
+    /// fact extraction as a named trace with Input/Output.
     fn spawn_fact_extraction(&self, user_message: &str, agent_response: &str, agent_msg_id: &str) {
         let fact_extractor = self.fact_extractor.clone();
         let long_term_memory = self.context_builder.long_term_memory().clone();
         let conversation_turn = format!("User: {}\nAgent: {}", user_message, agent_response);
         let agent_msg_id = agent_msg_id.to_string();
 
-        tokio::spawn(async move {
-            // Extract facts using LLM
-            match fact_extractor.extract(&conversation_turn).await {
-                Ok(extraction) => {
-                    if extraction.facts.is_empty() {
-                        tracing::debug!("No facts extracted from conversation turn");
-                        return;
-                    }
+        // Create span before spawning so Langfuse context is attached
+        let extraction_span = tracing::info_span!(
+            "ownai.fact_extraction",
+            instance_id = %self.instance_id,
+            instance_name = %self.instance_name,
+        );
+        self.attach_langfuse_context(&extraction_span);
+        extraction_span.set_attribute("gen_ai.operation.name", "fact_extraction");
+        extraction_span.set_attribute("gen_ai.prompt.0.role", "user");
+        extraction_span.set_attribute("gen_ai.prompt.0.content", conversation_turn.clone());
 
-                    tracing::info!(
-                        "Extracted {} facts from conversation",
-                        extraction.facts.len()
-                    );
+        tokio::spawn(
+            async move {
+                // Extract facts using LLM
+                match fact_extractor.extract(&conversation_turn).await {
+                    Ok(extraction) => {
+                        let current_span = tracing::Span::current();
 
-                    // Convert extracted facts to memory entries and store them
-                    let mut mem = long_term_memory.lock().await;
+                        if extraction.facts.is_empty() {
+                            tracing::debug!("No facts extracted from conversation turn");
+                            current_span.set_attribute("gen_ai.completion.0.role", "assistant");
+                            current_span.set_attribute(
+                                "gen_ai.completion.0.content",
+                                "No facts extracted".to_string(),
+                            );
+                            return;
+                        }
 
-                    for fact_item in extraction.facts {
-                        let entry = fact_extraction::to_memory_entry(fact_item, &agent_msg_id);
+                        tracing::info!(
+                            "Extracted {} facts from conversation",
+                            extraction.facts.len()
+                        );
 
-                        if let Err(e) = mem.store(entry).await {
-                            tracing::warn!("Failed to store extracted fact: {}", e);
+                        // Set output on span
+                        let facts_output: Vec<String> =
+                            extraction.facts.iter().map(|f| f.content.clone()).collect();
+                        current_span.set_attribute("gen_ai.completion.0.role", "assistant");
+                        current_span
+                            .set_attribute("gen_ai.completion.0.content", facts_output.join("\n"));
+
+                        // Convert extracted facts to memory entries and store them
+                        let mut mem = long_term_memory.lock().await;
+
+                        for fact_item in extraction.facts {
+                            let entry = fact_extraction::to_memory_entry(fact_item, &agent_msg_id);
+
+                            if let Err(e) = mem.store(entry).await {
+                                tracing::warn!("Failed to store extracted fact: {}", e);
+                            }
                         }
                     }
-                }
-                Err(e) => {
-                    // Don't fail the chat if fact extraction fails - just log it
-                    tracing::warn!("Failed to extract facts from conversation: {}", e);
+                    Err(e) => {
+                        // Don't fail the chat if fact extraction fails - just log it
+                        tracing::warn!("Failed to extract facts from conversation: {}", e);
+                    }
                 }
             }
-        });
+            .instrument(extraction_span),
+        );
     }
 }

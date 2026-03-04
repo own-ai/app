@@ -64,7 +64,18 @@
     "api_key_change": "Change API Key",
     "api_key_placeholder": "Enter your {{provider}} API key",
     "api_key_empty": "Please enter an API key",
-    "about": "About"
+    "about": "About",
+    "langfuse_title": "Langfuse (Observability)",
+    "langfuse_description": "Connect to Langfuse for LLM call tracing and observability. Credentials are stored securely in your system keychain.",
+    "langfuse_configured": "Configured",
+    "langfuse_public_key": "Public Key",
+    "langfuse_secret_key": "Secret Key",
+    "langfuse_host": "Host",
+    "langfuse_host_hint": "Leave empty for Langfuse Cloud (cloud.langfuse.com). Set for self-hosted instances.",
+    "langfuse_keys_empty": "Please enter both public key and secret key",
+    "langfuse_add": "Configure Langfuse",
+    "langfuse_change": "Change Configuration",
+    "langfuse_restart_hint": "Changes require an app restart to take effect."
   },
   "canvas": {
     "programs": "Programs",
