@@ -893,10 +893,12 @@ Remember: You are building a long-term relationship with this user."#,
     async fn load_recent_messages_from_db(db: &Pool<Sqlite>, limit: i32) -> Result<Vec<Message>> {
         let rows = sqlx::query(
             r#"
-            SELECT id, role, content, timestamp, importance_score
-            FROM messages
-            ORDER BY timestamp ASC
-            LIMIT ?
+            SELECT * FROM (
+                SELECT id, role, content, timestamp, importance_score
+                FROM messages
+                ORDER BY timestamp DESC
+                LIMIT ?
+            ) ORDER BY timestamp ASC
             "#,
         )
         .bind(limit)
