@@ -54,10 +54,10 @@ impl ContextBuilder {
 
         if !memories.is_empty() {
             context_parts.push("## Relevant Context:\n".to_string());
-            for memory in memories {
+            for (similarity, memory) in memories {
                 context_parts.push(format!(
-                    "- {} (Type: {:?}, Importance: {:.2})\n",
-                    memory.content, memory.entry_type, memory.importance
+                    "- {} (Type: {:?}, Importance: {:.2}, similarity: {:.3})\n",
+                    memory.content, memory.entry_type, memory.importance, similarity
                 ));
             }
             context_parts.push("\n".to_string());

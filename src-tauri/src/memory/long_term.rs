@@ -158,24 +158,26 @@ impl LongTermMemory {
     }
 
     /// Recall memories using semantic search.
+    /// Returns entries paired with their similarity score (highest first).
     pub async fn recall(
         &mut self,
         query: &str,
         limit: usize,
         min_importance: f32,
-    ) -> Result<Vec<MemoryEntry>> {
+    ) -> Result<Vec<(f32, MemoryEntry)>> {
         self.recall_with_collection(query, limit, min_importance, None)
             .await
     }
 
     /// Recall memories using semantic search, optionally filtered by collection.
+    /// Returns entries paired with their similarity score (highest first).
     pub async fn recall_with_collection(
         &mut self,
         query: &str,
         limit: usize,
         min_importance: f32,
         collection_id: Option<&str>,
-    ) -> Result<Vec<MemoryEntry>> {
+    ) -> Result<Vec<(f32, MemoryEntry)>> {
         // Generate query embedding
         let query_embeddings = self
             .embedder
@@ -262,7 +264,7 @@ impl LongTermMemory {
                 memory.id,
                 similarity
             );
-            results.push(memory);
+            results.push((similarity, memory));
         }
 
         Ok(results)

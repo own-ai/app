@@ -143,13 +143,14 @@ impl Tool for SearchMemoryTool {
         }
 
         let mut output = format!("Found {} matching memories:\n\n", results.len());
-        for (i, entry) in results.iter().enumerate() {
+        for (i, (similarity, entry)) in results.iter().enumerate() {
             output.push_str(&format!(
-                "{}. [{}] (type: {:?}, importance: {:.2})\n   {}\n\n",
+                "{}. [{}] (type: {:?}, importance: {:.2}, similarity: {:.3})\n   {}\n\n",
                 i + 1,
                 entry.id,
                 entry.entry_type,
                 entry.importance,
+                similarity,
                 entry.content,
             ));
         }

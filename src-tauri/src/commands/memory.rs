@@ -91,16 +91,14 @@ pub async fn search_memory(
         .await
         .map_err(|e| format!("Failed to search memory: {}", e))?;
 
-    // Convert to search results (we don't have access to similarity scores from recall)
-    // So we'll just return importance as a proxy
     let results: Vec<MemorySearchResult> = memories
         .into_iter()
-        .map(|mem| MemorySearchResult {
+        .map(|(similarity, mem)| MemorySearchResult {
             id: mem.id,
             content: mem.content,
             entry_type: format!("{:?}", mem.entry_type),
             importance: mem.importance,
-            similarity: mem.importance, // Proxy - actual similarity not exposed by recall
+            similarity,
         })
         .collect();
 
