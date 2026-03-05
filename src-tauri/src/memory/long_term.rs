@@ -333,7 +333,7 @@ impl LongTermMemory {
         let rows = sqlx::query(
             r#"
             SELECT id, content, entry_type, importance, created_at,
-                   last_accessed, access_count, tags, source_message_ids
+                   last_accessed, access_count, tags, source_message_ids, collection_id
             FROM memory_entries
             WHERE entry_type = ?
             ORDER BY importance DESC, created_at DESC
@@ -358,7 +358,7 @@ impl LongTermMemory {
                     access_count: row.get::<i32, _>("access_count") as u32,
                     tags: serde_json::from_str(row.get("tags")).ok()?,
                     source_message_ids: serde_json::from_str(row.get("source_message_ids")).ok()?,
-                    collection_id: None,
+                    collection_id: row.get("collection_id"),
                 })
             })
             .collect();
