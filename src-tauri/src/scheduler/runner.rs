@@ -10,13 +10,13 @@ use rig::providers::{anthropic, ollama, openai};
 use sqlx::{Pool, Sqlite};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tracing::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::ai_instances::{AIInstance, AIInstanceManager, APIKeyStorage, LLMProvider};
-use crate::database::init_database;
+use crate::database::{get_or_init_db, DbCache};
 use crate::memory::{LongTermMemory, SharedLongTermMemory};
 use crate::tools::registry::RhaiToolRegistry;
 use crate::tools::rhai_bridge_tool::SharedRegistry;
@@ -75,7 +75,8 @@ pub async fn register_task_job(
                             result.len()
                         );
 
-                        if let Ok(db) = init_database(&instance_id).await {
+                        let db_cache = app_handle.state::<DbCache>();
+                        if let Ok(db) = get_or_init_db(db_cache.inner(), &instance_id).await {
                             // Update last_run in scheduled_tasks table
                             let truncated = if result.len() > 2000 {
                                 format!("{}...", &result[..2000])
@@ -112,7 +113,8 @@ pub async fn register_task_job(
                     Err(e) => {
                         tracing::error!("Scheduled task '{}' failed: {}", task_name, e);
 
-                        if let Ok(db) = init_database(&instance_id).await {
+                        let db_cache = app_handle.state::<DbCache>();
+                        if let Ok(db) = get_or_init_db(db_cache.inner(), &instance_id).await {
                             // Update last_run with error
                             let error_msg = format!("Error: {}", e);
                             let _ = storage::update_task_last_run(&db, &task_id, &error_msg).await;
@@ -232,8 +234,9 @@ async fn execute_task(
         String::new()
     };
 
-    // 3. Initialize instance database
-    let db = init_database(instance_id).await?;
+    // 3. Get cached database pool for this instance
+    let db_cache = app_handle.state::<DbCache>();
+    let db = get_or_init_db(db_cache.inner(), instance_id).await?;
 
     // 4. Build tools (same as sub-agents, without delegate_task)
     let workspace =

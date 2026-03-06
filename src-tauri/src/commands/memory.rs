@@ -2,7 +2,7 @@ use serde::Serialize;
 use tauri::State;
 
 use super::chat::AgentCache;
-use crate::database::init_database;
+use crate::database::{get_or_init_db, DbCache};
 use crate::memory::fact_extraction;
 
 /// Memory statistics for debugging/monitoring
@@ -30,6 +30,7 @@ pub struct MemorySearchResult {
 pub async fn get_memory_stats(
     instance_id: String,
     agent_cache: State<'_, AgentCache>,
+    db_cache: State<'_, DbCache>,
 ) -> Result<MemoryStats, String> {
     let cache = agent_cache.lock().await;
 
@@ -44,7 +45,7 @@ pub async fn get_memory_stats(
     drop(cache);
 
     // Get DB-based stats (summaries count, long-term memory count)
-    let db = init_database(&instance_id)
+    let db = get_or_init_db(&db_cache, &instance_id)
         .await
         .map_err(|e| format!("Failed to initialize database: {}", e))?;
 

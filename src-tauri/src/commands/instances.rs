@@ -1,6 +1,7 @@
 use crate::ai_instances::{
     AIInstance, AIInstanceManager, APIKeyStorage, CreateInstanceRequest, LLMProvider, ProviderInfo,
 };
+use crate::database::{remove_cached_db, DbCache};
 use std::sync::Arc;
 use tauri::State;
 use tokio::sync::Mutex;
@@ -179,11 +180,17 @@ pub async fn get_active_instance(
 pub async fn delete_ai_instance(
     instance_id: String,
     manager: State<'_, Arc<Mutex<AIInstanceManager>>>,
+    db_cache: State<'_, DbCache>,
 ) -> Result<(), String> {
     let mut manager = manager.lock().await;
 
     // Delete the instance
     manager
         .delete_instance(&instance_id)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+
+    // Remove cached database pool for this instance
+    remove_cached_db(&db_cache, &instance_id).await;
+
+    Ok(())
 }

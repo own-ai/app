@@ -129,6 +129,14 @@ OwnAIAgent
 - Multi-turn tool calling enabled (MAX_TOOL_TURNS = 50)
 - Agent uses `process_stream!` macro for uniform streaming across all providers
 
+#### DbCache Pattern
+- `HashMap<String, Pool<Sqlite>>` wrapped in `Arc<Mutex<>>` (`DbCache` type alias)
+- Managed as Tauri state, accessible via `State<'_, DbCache>` in commands and `app_handle.state::<DbCache>()` in spawned tasks
+- `get_or_init_db()`: Returns cached pool or initializes + caches on first access
+- `remove_cached_db()`: Removes pool when instance is deleted
+- `SqlitePool` is internally `Arc`-based, so cloning from cache is a cheap shared handle
+- Eliminates redundant pool creation + migration checks on every command invocation
+
 #### AgentCache Pattern
 - `HashMap<String, OwnAIAgent>` wrapped in `Arc<Mutex<>>`
 - Lazy initialization: agent created on first use per instance

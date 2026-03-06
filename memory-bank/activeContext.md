@@ -69,6 +69,21 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 
 ## Recent Changes
 
+- **Database Pool Caching (Post-Phase 4)**:
+  - **Problem**: 13 Tauri commands and scheduler runner called `init_database()` on every invocation, creating a new `SqlitePool` and running migration checks each time -- redundant since the DB is already initialized on first access
+  - **Solution**: Introduced `DbCache` (`Arc<Mutex<HashMap<String, Pool<Sqlite>>>>`) as Tauri managed state
+  - **New in `database/mod.rs`**: `DbCache` type alias, `get_or_init_db()` (cached wrapper around `init_database()`), `remove_cached_db()` (cleanup on instance deletion)
+  - **`lib.rs`**: `DbCache` initialized and managed as Tauri state, scheduler startup uses `get_or_init_db()`
+  - **All affected commands updated** (8 files, 17 call sites -> only 1 actual `init_database()` call inside `get_or_init_db()`):
+    - `commands/chat.rs`: `send_message`, `stream_message`, `load_messages` -- all use `DbCache` State parameter
+    - `commands/memory.rs`: `get_memory_stats` -- uses `DbCache` State parameter
+    - `commands/canvas.rs`: `list_programs`, `delete_program`, `get_program_url`, `bridge_request` -- all use `DbCache`; `bridge_request` inner chat method reuses outer `pool.clone()` instead of second `init_database()`
+    - `commands/scheduler.rs`: `list_scheduled_tasks`, `delete_scheduled_task`, `toggle_scheduled_task` -- all use `DbCache`
+    - `commands/instances.rs`: `delete_ai_instance` -- calls `remove_cached_db()` to clean up pool on instance deletion
+    - `scheduler/runner.rs`: `execute_task` and both cron closure paths (success/error) -- use `app_handle.state::<DbCache>()`
+  - **Architecture**: `SqlitePool` is internally `Arc`-based, so cloning from cache is cheap (shared handle). `init_database()` remains as low-level function. Pool removed from cache only when instance is deleted.
+  - All 218 Rust tests pass, clippy clean
+
 - **Database Migration System (Post-Phase 4)**:
   - **Problem**: CREATE TABLE statements scattered across 4 files (schema.rs, long_term.rs, summarization.rs, collections.rs), ALTER TABLE "pseudo-migrations" running every startup, duplicate table definition for knowledge_collections
   - **Solution**: Consolidated all schema into a single sqlx migration file, using `sqlx::migrate!()` macro for embedded compile-time migrations

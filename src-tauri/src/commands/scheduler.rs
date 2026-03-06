@@ -5,13 +5,16 @@ use tauri::State;
 use tokio::sync::Mutex;
 
 use crate::ai_instances::AIInstanceManager;
-use crate::database::init_database;
+use crate::database::{get_or_init_db, DbCache};
 use crate::scheduler::{storage, SharedScheduler};
 
 /// List all scheduled tasks for an instance.
 #[tauri::command]
-pub async fn list_scheduled_tasks(instance_id: String) -> Result<Vec<serde_json::Value>, String> {
-    let db = init_database(&instance_id)
+pub async fn list_scheduled_tasks(
+    instance_id: String,
+    db_cache: State<'_, DbCache>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let db = get_or_init_db(&db_cache, &instance_id)
         .await
         .map_err(|e| format!("Failed to initialize database: {}", e))?;
 
@@ -33,8 +36,9 @@ pub async fn delete_scheduled_task(
     instance_id: String,
     task_id: String,
     scheduler: State<'_, SharedScheduler>,
+    db_cache: State<'_, DbCache>,
 ) -> Result<(), String> {
-    let db = init_database(&instance_id)
+    let db = get_or_init_db(&db_cache, &instance_id)
         .await
         .map_err(|e| format!("Failed to initialize database: {}", e))?;
 
@@ -64,8 +68,9 @@ pub async fn toggle_scheduled_task(
     scheduler: State<'_, SharedScheduler>,
     instance_manager: State<'_, Arc<Mutex<AIInstanceManager>>>,
     app_handle: tauri::AppHandle,
+    db_cache: State<'_, DbCache>,
 ) -> Result<(), String> {
-    let db = init_database(&instance_id)
+    let db = get_or_init_db(&db_cache, &instance_id)
         .await
         .map_err(|e| format!("Failed to initialize database: {}", e))?;
 

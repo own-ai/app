@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 
 use crate::agent::OwnAIAgent;
 use crate::ai_instances::AIInstanceManager;
-use crate::database::init_database;
+use crate::database::{get_or_init_db, DbCache};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
@@ -34,6 +34,7 @@ pub async fn send_message(
     app_handle: tauri::AppHandle,
     instance_manager: State<'_, Arc<Mutex<AIInstanceManager>>>,
     agent_cache: State<'_, AgentCache>,
+    db_cache: State<'_, DbCache>,
 ) -> Result<Message, String> {
     // 1. Get instance
     let manager = instance_manager.lock().await;
@@ -47,8 +48,8 @@ pub async fn send_message(
     let mut cache = agent_cache.lock().await;
 
     if !cache.contains_key(&request.instance_id) {
-        // Initialize database for this instance
-        let db = init_database(&request.instance_id)
+        // Get cached database pool for this instance
+        let db = get_or_init_db(&db_cache, &request.instance_id)
             .await
             .map_err(|e| format!("Failed to initialize database: {}", e))?;
 
@@ -95,6 +96,7 @@ pub async fn stream_message(
     window: tauri::Window,
     instance_manager: State<'_, Arc<Mutex<AIInstanceManager>>>,
     agent_cache: State<'_, AgentCache>,
+    db_cache: State<'_, DbCache>,
 ) -> Result<(), String> {
     // 1. Get instance
     let manager = instance_manager.lock().await;
@@ -108,8 +110,8 @@ pub async fn stream_message(
     let mut cache = agent_cache.lock().await;
 
     if !cache.contains_key(&request.instance_id) {
-        // Initialize database for this instance
-        let db = init_database(&request.instance_id)
+        // Get cached database pool for this instance
+        let db = get_or_init_db(&db_cache, &request.instance_id)
             .await
             .map_err(|e| format!("Failed to initialize database: {}", e))?;
 
@@ -150,8 +152,9 @@ pub async fn load_messages(
     instance_id: String,
     limit: i32,
     offset: i32,
+    db_cache: State<'_, DbCache>,
 ) -> Result<Vec<Message>, String> {
-    let pool = init_database(&instance_id)
+    let pool = get_or_init_db(&db_cache, &instance_id)
         .await
         .map_err(|e| e.to_string())?;
 

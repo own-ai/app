@@ -94,6 +94,10 @@ pub fn run() {
             let agent_cache: commands::chat::AgentCache = Arc::new(Mutex::new(HashMap::new()));
             app.manage(agent_cache);
 
+            // Initialize Database Cache (pools per instance, avoids repeated init_database())
+            let db_cache: database::DbCache = Arc::new(Mutex::new(HashMap::new()));
+            app.manage(db_cache.clone());
+
             // Initialize Scheduler
             let app_handle = app.handle().clone();
             let manager_for_scheduler = shared_manager.clone();
@@ -111,7 +115,9 @@ pub fn run() {
                             drop(mgr);
 
                             for instance_id in instance_ids {
-                                if let Ok(db) = database::init_database(&instance_id).await {
+                                if let Ok(db) =
+                                    database::get_or_init_db(&db_cache, &instance_id).await
+                                {
                                     if let Err(e) =
                                         scheduler::runner::load_and_register_instance_tasks(
                                             &shared_scheduler,

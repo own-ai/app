@@ -96,6 +96,7 @@
 - [x] Langfuse Settings UI: Public key, secret key, host configuration in Settings panel
 - [x] Agent `.name()` set on all provider builders for proper Langfuse trace naming
 - [x] LangfuseContext helper with session_id, tags, metadata for trace enrichment
+- [x] Database Pool Caching: `DbCache` type as Tauri managed state, `get_or_init_db()` caches pools per instance, eliminates 13 redundant `init_database()` calls across commands and scheduler
 
 ## What's Left to Build
 

@@ -7,13 +7,16 @@ use crate::canvas::bridge::{self, BridgeResponse};
 use crate::canvas::storage;
 use crate::canvas::ProgramMetadata;
 use crate::commands::chat::AgentCache;
-use crate::database::init_database;
+use crate::database::{get_or_init_db, DbCache};
 use crate::utils::paths;
 
 /// List all Canvas programs for an instance.
 #[tauri::command]
-pub async fn list_programs(instance_id: String) -> Result<Vec<ProgramMetadata>, String> {
-    let pool = init_database(&instance_id)
+pub async fn list_programs(
+    instance_id: String,
+    db_cache: State<'_, DbCache>,
+) -> Result<Vec<ProgramMetadata>, String> {
+    let pool = get_or_init_db(&db_cache, &instance_id)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -24,8 +27,12 @@ pub async fn list_programs(instance_id: String) -> Result<Vec<ProgramMetadata>, 
 
 /// Delete a Canvas program by name.
 #[tauri::command]
-pub async fn delete_program(instance_id: String, program_name: String) -> Result<(), String> {
-    let pool = init_database(&instance_id)
+pub async fn delete_program(
+    instance_id: String,
+    program_name: String,
+    db_cache: State<'_, DbCache>,
+) -> Result<(), String> {
+    let pool = get_or_init_db(&db_cache, &instance_id)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -43,6 +50,7 @@ pub async fn get_program_url(
     instance_id: String,
     program_name: String,
     instance_manager: State<'_, Arc<Mutex<AIInstanceManager>>>,
+    db_cache: State<'_, DbCache>,
 ) -> Result<String, String> {
     // Verify instance exists
     let manager = instance_manager.lock().await;
@@ -52,7 +60,7 @@ pub async fn get_program_url(
     drop(manager);
 
     // Verify program exists
-    let pool = init_database(&instance_id)
+    let pool = get_or_init_db(&db_cache, &instance_id)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -71,6 +79,7 @@ pub async fn get_program_url(
 ///
 /// The frontend forwards postMessage requests from the iframe to this command.
 /// Dispatches to the appropriate bridge handler based on the method.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn bridge_request(
     instance_id: String,
@@ -80,8 +89,9 @@ pub async fn bridge_request(
     app_handle: tauri::AppHandle,
     instance_manager: State<'_, Arc<Mutex<AIInstanceManager>>>,
     agent_cache: State<'_, AgentCache>,
+    db_cache: State<'_, DbCache>,
 ) -> Result<BridgeResponse, String> {
-    let pool = init_database(&instance_id)
+    let pool = get_or_init_db(&db_cache, &instance_id)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -108,14 +118,14 @@ pub async fn bridge_request(
             let mut cache = agent_cache.lock().await;
 
             if !cache.contains_key(&instance_id) {
-                let db = init_database(&instance_id)
-                    .await
-                    .map_err(|e| format!("Failed to initialize database: {}", e))?;
-
-                let agent =
-                    crate::agent::OwnAIAgent::new(&instance, db, None, Some(app_handle.clone()))
-                        .await
-                        .map_err(|e| format!("Failed to create agent: {}", e))?;
+                let agent = crate::agent::OwnAIAgent::new(
+                    &instance,
+                    pool.clone(),
+                    None,
+                    Some(app_handle.clone()),
+                )
+                .await
+                .map_err(|e| format!("Failed to create agent: {}", e))?;
 
                 cache.insert(instance_id.clone(), agent);
             }
