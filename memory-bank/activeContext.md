@@ -69,6 +69,20 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 
 ## Recent Changes
 
+- **Tool Call History Persistence (Post-Phase 4)**:
+  - **Problem**: The LLM sometimes "pretended" to call tools (outputting text like "I created file X" without an actual tool call in Langfuse tracing). Root cause: tool calls and results were not persisted in the message history. When rebuilding context for subsequent turns, only plain text user/assistant messages were sent -- the LLM never saw its own previous tool_use/tool_result blocks, causing it to sometimes mimic tool usage in text instead of actually calling tools.
+  - **Solution**: Full persistence and reconstruction of tool call history across both streaming and non-streaming paths:
+    1. **DB Migration**: `20260306173500_tool_result_role.sql` -- adds `tool_result` to the role CHECK constraint on the messages table (SQLite table recreation)
+    2. **Working Memory Types**: New `ToolCallData`, `ToolResultData`, `MessageMetadata` (tagged enum with `tool_calls`/`tool_result` variants) in `working_memory.rs`. `Message` struct gains `metadata: Option<MessageMetadata>` field.
+    3. **Non-Streaming (`chat_inner`)**: After rig's `prompt().with_history(&mut history)` call, intermediate messages are extracted from rig's modified history (`rig_message_to_db_messages()`) and saved to DB + working memory before the final agent response.
+    4. **Streaming (`stream_chat_inner`)**: `process_stream!` macro now captures `StreamedAssistantContent::ToolCall` and `StreamedUserContent::ToolResult` events. On `Final` event, if tool calls were made in that turn, an intermediate agent message with `ToolCalls` metadata is saved. Tool results are saved as `tool_result` role messages. Intermediate turn text is removed from `full_response` so only the final turn's text becomes the agent message.
+    5. **History Reconstruction (`build_history_with_time_markers`)**: Handles `tool_result` role messages (grouped into single `RigMessage::User` with multiple `ToolResult` items) and agent messages with `ToolCalls` metadata (reconstructed as `RigMessage::Assistant` with `ToolCall` content items). Uses `db_message_to_rig_message()` helper.
+    6. **DB Load/Save**: `load_recent_messages_from_db` now includes and parses the metadata column. New `save_message_to_db` replaces `save_message_with_id`, saving metadata as JSON. `load_messages` Tauri command already included metadata column.
+  - **New methods on OwnAIAgent**: `save_message_to_db()`, `rig_message_to_db_messages()` (rig -> DB), `db_message_to_rig_message()` (DB -> rig)
+  - **Key rig API**: `OneOrMany<T>` is a struct (`first: T, rest: Vec<T>`), constructed with `OneOrMany::one()` + `.push()` for multiple items. NOT an enum.
+  - **Files changed**: `agent/mod.rs` (major), `memory/working_memory.rs` (types), `memory/summarization.rs` (test fix), `migrations/20260306173500_tool_result_role.sql` (new)
+  - All 234 Rust tests pass, cargo build clean
+
 - **Temporal Context for LLM (Post-Phase 4)**:
   - **Problem**: The LLM had no awareness of time -- it received chat history as a flat list without timestamps. After a week-long break, the AI would continue as if the conversation just happened, leading to unnatural responses.
   - **Solution**: Three-part temporal awareness system, all invisible to the user (only sent to the LLM):
@@ -148,6 +162,23 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
   - **Solution**: Added `collection: Option<String>` to `AddMemoryArgs` and `db: Option<Pool<Sqlite>>` to `AddMemoryTool`, following the exact same pattern as SearchMemoryTool's collection parameter
   - **Files changed**: `tools/memory_tools.rs` (main change), `agent/mod.rs` (updated constructor call), `tools/subagents.rs` (updated constructor call), `tools/collection_tools.rs` (fixed success message format)
   - All 219 Rust tests pass
+
+- **Tool Call History Ordering Fix (Post-Phase 4)**:
+  - **Problem**: After an app restart following a tool call, Anthropic returned 400 Bad Request: `unexpected tool_use_id found in tool_result blocks`. The `tool_result` was saved to DB 70ms BEFORE the corresponding `agent+tool_calls` message because rig's streaming delivers `ToolResult` events before the `Final` event that closes the assistant turn.
+  - **Root Cause**: In `process_stream!` macro, `StreamedUserContent::ToolResult` was pushed directly to `intermediate_messages`, but the agent+tool_calls message was only created on `StreamedAssistantContent::Final` (which arrives after ToolResult). This caused wrong ordering: `[tool_result, agent+tool_calls]` instead of `[agent+tool_calls, tool_result]`.
+  - **Fix 1 (Root Cause)**: Added `_pending_tool_results` buffer in `process_stream!` macro. Tool results are now buffered and only flushed to `intermediate_messages` AFTER the `Final` event pushes the agent+tool_calls message. Timestamps are reassigned on flush to ensure correct chronological ordering in DB.
+  - **Fix 2 (Safety Net)**: New `sanitize_tool_history()` method called at the end of `build_history_with_time_markers()`. Validates that every `User` message with `ToolResult` content has a matching `tool_use` in the immediately preceding `Assistant` message. Orphaned tool_results are converted to plain text `[Previous tool result: ...]` messages. Protects against: older DB data with wrong ordering, working memory truncation splitting tool pairs, eviction splitting tool pairs.
+  - Files changed: `src-tauri/src/agent/mod.rs`
+  - All 234 Rust tests pass, cargo build clean
+
+- **Empty Agent Message Fix (Post-Phase 4)**:
+  - **Problem**: After multi-turn tool calling where the agent's final turn is purely tool calls with no text, an empty agent message (content="") was saved to DB. On the next conversation, Anthropic rejected it with: `"text content blocks must be non-empty"`.
+  - **Root Cause**: In both `stream_chat_inner()` and `chat_inner()`, the final agent response was always saved regardless of whether it was empty. Additionally, `build_history_with_time_markers()` would reconstruct empty-content agent messages as `RigMessage::assistant("")` which Anthropic rejects.
+  - **Fix 1a (`stream_chat_inner`)**: `agent_msg_id` changed from `String` to `Option<String>`. Only saves final agent message if `!full_response.is_empty()`. Token persistence and fact extraction are conditional on `agent_msg_id.is_some()`.
+  - **Fix 1b (`chat_inner`)**: Checks `!response.is_empty()` before saving final agent message. Fact extraction only runs if response is non-empty.
+  - **Fix 2 (`build_history_with_time_markers`)**: Added `!msg.content.is_empty()` check in the `"agent"` branch to skip empty plain-text agent messages when reconstructing history.
+  - Files changed: `src-tauri/src/agent/mod.rs`
+  - All 234 Rust tests pass, cargo build clean
 
 - **Background Fact Extraction (Post-Phase 4)**:
   - **Problem**: `extract_and_store_facts()` ran synchronously after each chat/streaming response, blocking the return of `stream_chat()`/`chat()`. This caused the frontend typing cursor to stay visible and events like `canvas:open_program` to be delayed until the LLM fact extraction API call + embedding computation completed.

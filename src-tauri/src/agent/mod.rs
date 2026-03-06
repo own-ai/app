@@ -5,9 +5,14 @@ use rig::agent::{Agent, MultiTurnStreamItem};
 use rig::client::{CompletionClient, Nothing};
 use rig::completion::Prompt;
 use rig::extractor::Extractor;
-use rig::message::Message as RigMessage;
+use rig::message::{
+    AssistantContent, Message as RigMessage, Text as RigText, ToolCall as RigToolCall,
+    ToolFunction as RigToolFunction, ToolResult as RigToolResult,
+    ToolResultContent as RigToolResultContent, UserContent,
+};
+use rig::one_or_many::OneOrMany;
 use rig::providers::{anthropic, ollama, openai};
-use rig::streaming::{StreamedAssistantContent, StreamingChat};
+use rig::streaming::{StreamedAssistantContent, StreamedUserContent, StreamingChat};
 use rig::tool::ToolDyn;
 use sqlx::{Pool, Row, Sqlite};
 use std::future::Future;
@@ -24,9 +29,10 @@ use crate::canvas::tools::{
     ProgramReadFileTool, ProgramWriteFileTool,
 };
 use crate::memory::{
-    fact_extraction, working_memory::Message, ContextBuilder, FactExtractionResponse,
-    LongTermMemory, SharedLongTermMemory, SummarizationAgent, SummaryExtractor, SummaryResponse,
-    WorkingMemory,
+    fact_extraction,
+    working_memory::{Message, MessageMetadata, ToolCallData, ToolResultData},
+    ContextBuilder, FactExtractionResponse, LongTermMemory, SharedLongTermMemory,
+    SummarizationAgent, SummaryExtractor, SummaryResponse, WorkingMemory,
 };
 use crate::scheduler::{
     CreateScheduledTaskTool, DeleteScheduledTaskTool, ListScheduledTasksTool, SharedScheduler,
@@ -45,31 +51,105 @@ use crate::tools::subagents::{base_tools_prompt, ClientProvider, DelegateTaskToo
 use crate::utils::paths;
 
 /// Macro to process streaming responses uniformly across providers.
-/// Handles both text chunks and multi-turn tool call items.
-/// Captures the `FinalResponse` (if any) so callers can extract token usage.
+/// Handles text chunks, tool calls, tool results, and multi-turn items.
+/// Captures intermediate tool messages for DB persistence and the
+/// `FinalResponse` (if any) so callers can extract token usage.
 macro_rules! process_stream {
-    ($stream:expr, $callback:expr, $full_response:expr, $final_response:expr) => {
-        while let Some(result) = $stream.next().await {
-            match result {
-                Ok(item) => match item {
-                    MultiTurnStreamItem::StreamAssistantItem(content) => match content {
-                        StreamedAssistantContent::Text(text) => {
-                            $callback(text.text.clone());
-                            $full_response.push_str(&text.text);
+    ($stream:expr, $callback:expr, $full_response:expr, $final_response:expr, $intermediate_messages:expr) => {
+        {
+            let mut _current_turn_text = String::new();
+            let mut _current_turn_tool_calls: Vec<crate::memory::working_memory::ToolCallData> = Vec::new();
+            // Buffer tool results so they are pushed AFTER the agent+tool_calls
+            // message on the Final event. Without this buffer, tool results would
+            // be saved before the corresponding tool_use message because rig
+            // delivers ToolResult events before the Final event that closes the
+            // assistant turn.
+            let mut _pending_tool_results: Vec<crate::memory::working_memory::Message> = Vec::new();
+
+            while let Some(result) = $stream.next().await {
+                match result {
+                    Ok(item) => match item {
+                        MultiTurnStreamItem::StreamAssistantItem(content) => match content {
+                            StreamedAssistantContent::Text(text) => {
+                                $callback(text.text.clone());
+                                $full_response.push_str(&text.text);
+                                _current_turn_text.push_str(&text.text);
+                            }
+                            StreamedAssistantContent::ToolCall { tool_call, .. } => {
+                                _current_turn_tool_calls.push(crate::memory::working_memory::ToolCallData {
+                                    id: tool_call.id.clone(),
+                                    call_id: tool_call.call_id.clone(),
+                                    name: tool_call.function.name.clone(),
+                                    arguments: tool_call.function.arguments.clone(),
+                                });
+                            }
+                            StreamedAssistantContent::Final(_) => {
+                                // End of assistant turn: if tool calls were made, save as intermediate.
+                                // Push agent+tool_calls FIRST, then any buffered tool results,
+                                // so the DB ordering matches the expected sequence:
+                                //   assistant(tool_use) -> user(tool_result)
+                                if !_current_turn_tool_calls.is_empty() {
+                                    $intermediate_messages.push(crate::memory::working_memory::Message {
+                                        id: uuid::Uuid::new_v4().to_string(),
+                                        role: "agent".to_string(),
+                                        content: _current_turn_text.clone(),
+                                        timestamp: chrono::Utc::now(),
+                                        importance_score: None,
+                                        metadata: Some(crate::memory::working_memory::MessageMetadata::ToolCalls {
+                                            calls: _current_turn_tool_calls.drain(..).collect(),
+                                        }),
+                                    });
+                                    // Now flush buffered tool results after the agent message
+                                    for mut tr in _pending_tool_results.drain(..) {
+                                        // Ensure tool result timestamp is after agent message
+                                        tr.timestamp = chrono::Utc::now();
+                                        $intermediate_messages.push(tr);
+                                    }
+                                    // Remove intermediate turn text from full_response so only
+                                    // the final turn's text remains as the agent message.
+                                    if $full_response.ends_with(&_current_turn_text) {
+                                        let new_len = $full_response.len() - _current_turn_text.len();
+                                        $full_response.truncate(new_len);
+                                    }
+                                    _current_turn_text.clear();
+                                }
+                            }
+                            _ => {} // Ignore other content types
+                        },
+                        MultiTurnStreamItem::StreamUserItem(user_content) => {
+                            let StreamedUserContent::ToolResult { tool_result, .. } = user_content;
+                            {
+                                let result_text = tool_result.content.iter().map(|c| match c {
+                                    RigToolResultContent::Text(t) => t.text.clone(),
+                                    _ => String::new(),
+                                }).collect::<Vec<_>>().join("");
+
+                                // Buffer tool results instead of pushing directly.
+                                // They will be flushed in the correct order (after
+                                // the agent+tool_calls message) on the Final event.
+                                _pending_tool_results.push(crate::memory::working_memory::Message {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                    role: "tool_result".to_string(),
+                                    content: result_text,
+                                    timestamp: chrono::Utc::now(),
+                                    importance_score: None,
+                                    metadata: Some(crate::memory::working_memory::MessageMetadata::ToolResult(
+                                        crate::memory::working_memory::ToolResultData {
+                                            tool_call_id: tool_result.id.clone(),
+                                            call_id: tool_result.call_id.clone(),
+                                        }
+                                    )),
+                                });
+                            }
                         }
-                        StreamedAssistantContent::Final(_) => {}
-                        _ => {} // Ignore other content types (tool use markers, etc.)
+                        MultiTurnStreamItem::FinalResponse(res) => {
+                            $final_response = Some(res);
+                        }
+                        _ => {} // Future variants
                     },
-                    MultiTurnStreamItem::StreamUserItem(_) => {
-                        // Tool result sent back (multi-turn); stream continues
+                    Err(e) => {
+                        return Err(anyhow::anyhow!("Streaming error: {}", e));
                     }
-                    MultiTurnStreamItem::FinalResponse(res) => {
-                        $final_response = Some(res);
-                    }
-                    _ => {} // Future variants
-                },
-                Err(e) => {
-                    return Err(anyhow::anyhow!("Streaming error: {}", e));
                 }
             }
         }
@@ -578,29 +658,181 @@ impl OwnAIAgent {
 
         let history_messages = &messages[..msg_count - 1];
         let mut history = Vec::with_capacity(history_messages.len());
+        let mut i = 0;
 
-        for (i, msg) in history_messages.iter().enumerate() {
-            let mut content = msg.content.clone();
+        while i < history_messages.len() {
+            let msg = &history_messages[i];
 
             // Check time gap from previous message
-            if i > 0 {
+            let time_marker = if i > 0 {
                 let gap = msg
                     .timestamp
                     .signed_duration_since(history_messages[i - 1].timestamp);
-                if let Some(marker) = crate::memory::ContextBuilder::format_history_time_marker(gap)
-                {
-                    content = format!("{}\n{}", marker, content);
+                crate::memory::ContextBuilder::format_history_time_marker(gap)
+            } else {
+                None
+            };
+
+            match msg.role.as_str() {
+                "tool_result" => {
+                    // Group consecutive tool_result messages into one User message
+                    // with multiple ToolResult items (as rig expects).
+                    let mut tool_results: Vec<UserContent> = Vec::new();
+                    while i < history_messages.len() && history_messages[i].role == "tool_result" {
+                        let tr_msg = &history_messages[i];
+                        if let Some(MessageMetadata::ToolResult(ref tr_data)) = tr_msg.metadata {
+                            tool_results.push(UserContent::ToolResult(RigToolResult {
+                                id: tr_data.tool_call_id.clone(),
+                                call_id: tr_data.call_id.clone(),
+                                content: OneOrMany::one(RigToolResultContent::Text(RigText {
+                                    text: tr_msg.content.clone(),
+                                })),
+                            }));
+                        }
+                        i += 1;
+                    }
+                    if !tool_results.is_empty() {
+                        let mut content = OneOrMany::one(tool_results.remove(0));
+                        for tr in tool_results {
+                            content.push(tr);
+                        }
+                        history.push(RigMessage::User { content });
+                    }
+                    continue; // i already advanced in the inner loop
+                }
+                "agent" => {
+                    if msg.metadata.is_some() {
+                        // Agent message with tool calls: reconstruct structured rig message
+                        history.push(Self::db_message_to_rig_message(msg));
+                    } else if !msg.content.is_empty() {
+                        // Plain text agent message
+                        let content = if let Some(marker) = time_marker {
+                            format!("{}\n{}", marker, msg.content)
+                        } else {
+                            msg.content.clone()
+                        };
+                        history.push(RigMessage::assistant(&content));
+                    }
+                }
+                _ => {
+                    // "user" or other roles
+                    let content = if let Some(marker) = time_marker {
+                        format!("{}\n{}", marker, msg.content)
+                    } else {
+                        msg.content.clone()
+                    };
+                    history.push(RigMessage::user(&content));
                 }
             }
 
-            if msg.role == "user" {
-                history.push(RigMessage::user(&content));
-            } else {
-                history.push(RigMessage::assistant(&content));
-            }
+            i += 1;
         }
 
+        // Sanitize: ensure every tool_result has a matching tool_use in the
+        // immediately preceding assistant message.
+        Self::sanitize_tool_history(&mut history);
+
         history
+    }
+
+    /// Validate and fix tool_use / tool_result pairing in the history.
+    ///
+    /// Anthropic requires that every `tool_result` block references a `tool_use`
+    /// block in the **immediately preceding** assistant message. This can be
+    /// violated when:
+    /// - DB messages were saved in wrong order (fixed in process_stream! but
+    ///   older data may still have the issue)
+    /// - Working memory truncation/eviction split a tool_use/tool_result pair
+    ///
+    /// For any orphaned tool_result (no matching tool_use in preceding message),
+    /// we convert it to a plain text user message to preserve the information
+    /// without violating the API protocol.
+    fn sanitize_tool_history(history: &mut Vec<RigMessage>) {
+        let mut i = 0;
+        while i < history.len() {
+            let needs_fix = if let RigMessage::User { ref content } = history[i] {
+                // Check if this User message contains ToolResult items
+                let tool_result_ids: Vec<String> = content
+                    .iter()
+                    .filter_map(|uc| {
+                        if let UserContent::ToolResult(ref tr) = uc {
+                            Some(tr.id.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                if tool_result_ids.is_empty() {
+                    false // Not a tool result message, skip
+                } else if i == 0 {
+                    true // No preceding message at all
+                } else {
+                    // Check if preceding message is an Assistant with matching tool_use ids
+                    if let RigMessage::Assistant { ref content, .. } = history[i - 1] {
+                        let tool_use_ids: std::collections::HashSet<String> = content
+                            .iter()
+                            .filter_map(|ac| {
+                                if let AssistantContent::ToolCall(ref tc) = ac {
+                                    Some(tc.id.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+
+                        // Check if ALL tool_result ids have a matching tool_use
+                        !tool_result_ids.iter().all(|id| tool_use_ids.contains(id))
+                    } else {
+                        true // Preceding message is not an Assistant
+                    }
+                }
+            } else {
+                false
+            };
+
+            if needs_fix {
+                // Convert tool_result to plain text user message
+                let text = if let RigMessage::User { ref content } = history[i] {
+                    content
+                        .iter()
+                        .filter_map(|uc| {
+                            if let UserContent::ToolResult(ref tr) = uc {
+                                let result_text = tr
+                                    .content
+                                    .iter()
+                                    .map(|c| match c {
+                                        RigToolResultContent::Text(ref t) => t.text.clone(),
+                                        _ => String::new(),
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("");
+                                Some(format!("[Previous tool result: {}]", result_text))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                } else {
+                    String::new()
+                };
+
+                if text.is_empty() {
+                    history.remove(i);
+                    // Don't increment i since we removed the element
+                } else {
+                    tracing::warn!(
+                        "Sanitizing orphaned tool_result at history index {} -> plain text",
+                        i
+                    );
+                    history[i] = RigMessage::user(&text);
+                    i += 1;
+                }
+            } else {
+                i += 1;
+            }
+        }
     }
 
     /// Add a message to working memory; if eviction occurs, summarize in background
@@ -646,10 +878,10 @@ impl OwnAIAgent {
             content: user_message.to_string(),
             timestamp: Utc::now(),
             importance_score: None,
+            metadata: None,
         };
         let user_msg_id = user_msg.id.clone();
-        self.save_message_with_id(&user_msg.id, &user_msg.role, &user_msg.content)
-            .await?;
+        self.save_message_to_db(&user_msg).await?;
 
         // 2. Add to working memory (may trigger eviction -> summarization)
         self.add_to_working_memory(user_msg).await;
@@ -659,6 +891,7 @@ impl OwnAIAgent {
 
         // 4. Build chat history from working memory (with time gap markers)
         let mut history = self.build_history_with_time_markers();
+        let history_len_before = history.len();
 
         // 5. Prepare prompt with memory context
         let prompt = if !context.is_empty() {
@@ -692,21 +925,43 @@ impl OwnAIAgent {
             }
         };
 
-        // 7. Save agent response to DB first, then add to working memory
-        let agent_msg = Message {
-            id: uuid::Uuid::new_v4().to_string(),
-            role: "agent".to_string(),
-            content: response.clone(),
-            timestamp: Utc::now(),
-            importance_score: None,
-        };
-        let agent_msg_id = agent_msg.id.clone();
-        self.save_message_with_id(&agent_msg.id, &agent_msg.role, &agent_msg.content)
-            .await?;
-        self.add_to_working_memory(agent_msg).await;
+        // 7. Extract intermediate tool messages from rig's modified history.
+        //    rig appends: [prompt, assistant+tool_calls, user+tool_results, ..., final_assistant]
+        //    We skip the prompt (already saved) and the final assistant (handled below).
+        let new_messages = &history[history_len_before..];
+        // Skip first (prompt added by rig) and last (final assistant response)
+        if new_messages.len() > 2 {
+            let intermediate = &new_messages[1..new_messages.len() - 1];
+            for rig_msg in intermediate {
+                let our_msgs = Self::rig_message_to_db_messages(rig_msg);
+                for msg in our_msgs {
+                    self.save_message_to_db(&msg).await?;
+                    self.add_to_working_memory(msg).await;
+                }
+            }
+        }
 
-        // 8. Extract and store facts in long-term memory (background task)
-        self.spawn_fact_extraction(user_message, &response, &user_msg_id, &agent_msg_id);
+        // 8. Save final agent response to DB, then add to working memory.
+        //    Skip if the response is empty (can happen when the agent's last
+        //    turn was purely tool calls with no accompanying text).
+        if !response.is_empty() {
+            let agent_msg = Message {
+                id: uuid::Uuid::new_v4().to_string(),
+                role: "agent".to_string(),
+                content: response.clone(),
+                timestamp: Utc::now(),
+                importance_score: None,
+                metadata: None,
+            };
+            let agent_msg_id = agent_msg.id.clone();
+            self.save_message_to_db(&agent_msg).await?;
+            self.add_to_working_memory(agent_msg).await;
+
+            // 9. Extract and store facts in long-term memory (background task)
+            self.spawn_fact_extraction(user_message, &response, &user_msg_id, &agent_msg_id);
+        } else {
+            tracing::debug!("Skipping empty final agent message (all text was in tool-call turns)");
+        }
 
         // Set completion attributes on parent span for Langfuse Input/Output display
         current_span.set_attribute("gen_ai.completion.0.role", "assistant");
@@ -759,10 +1014,10 @@ impl OwnAIAgent {
             content: user_message.to_string(),
             timestamp: Utc::now(),
             importance_score: None,
+            metadata: None,
         };
         let user_msg_id = user_msg.id.clone();
-        self.save_message_with_id(&user_msg.id, &user_msg.role, &user_msg.content)
-            .await?;
+        self.save_message_to_db(&user_msg).await?;
         self.add_to_working_memory(user_msg).await;
 
         // 2. Build context
@@ -781,6 +1036,7 @@ impl OwnAIAgent {
         // 5. Stream with multi-turn tool calling support
         let mut full_response = String::new();
         let mut final_response: Option<rig::agent::FinalResponse> = None;
+        let mut intermediate_messages: Vec<Message> = Vec::new();
 
         match &self.agent {
             AgentProvider::Anthropic(agent) => {
@@ -788,21 +1044,39 @@ impl OwnAIAgent {
                     .stream_chat(&prompt, history)
                     .multi_turn(MAX_TOOL_TURNS)
                     .await;
-                process_stream!(stream, callback, full_response, final_response);
+                process_stream!(
+                    stream,
+                    callback,
+                    full_response,
+                    final_response,
+                    intermediate_messages
+                );
             }
             AgentProvider::OpenAI(agent) => {
                 let mut stream = agent
                     .stream_chat(&prompt, history)
                     .multi_turn(MAX_TOOL_TURNS)
                     .await;
-                process_stream!(stream, callback, full_response, final_response);
+                process_stream!(
+                    stream,
+                    callback,
+                    full_response,
+                    final_response,
+                    intermediate_messages
+                );
             }
             AgentProvider::Ollama(agent) => {
                 let mut stream = agent
                     .stream_chat(&prompt, history)
                     .multi_turn(MAX_TOOL_TURNS)
                     .await;
-                process_stream!(stream, callback, full_response, final_response);
+                process_stream!(
+                    stream,
+                    callback,
+                    full_response,
+                    final_response,
+                    intermediate_messages
+                );
             }
         }
 
@@ -818,29 +1092,45 @@ impl OwnAIAgent {
             }
         }
 
-        // 6. Save agent response to DB first, then add to working memory
-        let agent_msg = Message {
-            id: uuid::Uuid::new_v4().to_string(),
-            role: "agent".to_string(),
-            content: full_response.clone(),
-            timestamp: Utc::now(),
-            importance_score: None,
+        // 6. Save intermediate tool messages (tool calls + results from multi-turn)
+        for msg in intermediate_messages {
+            self.save_message_to_db(&msg).await?;
+            self.add_to_working_memory(msg).await;
+        }
+
+        // 7. Save agent response to DB first, then add to working memory.
+        //    Skip if the final response is empty (can happen when the agent's
+        //    last turn was purely tool calls with no accompanying text).
+        let agent_msg_id = if !full_response.is_empty() {
+            let agent_msg = Message {
+                id: uuid::Uuid::new_v4().to_string(),
+                role: "agent".to_string(),
+                content: full_response.clone(),
+                timestamp: Utc::now(),
+                importance_score: None,
+                metadata: None,
+            };
+            let id = agent_msg.id.clone();
+            self.save_message_to_db(&agent_msg).await?;
+            self.add_to_working_memory(agent_msg).await;
+            Some(id)
+        } else {
+            tracing::debug!("Skipping empty final agent message (all text was in tool-call turns)");
+            None
         };
-        let agent_msg_id = agent_msg.id.clone();
-        self.save_message_with_id(&agent_msg.id, &agent_msg.role, &agent_msg.content)
-            .await?;
-        self.add_to_working_memory(agent_msg).await;
 
         // Persist output_tokens on agent message
-        if let Some(ref res) = final_response {
+        if let (Some(ref res), Some(ref msg_id)) = (&final_response, &agent_msg_id) {
             let usage = res.usage();
             if usage.output_tokens > 0 {
-                Self::update_tokens_used(&self.db, &agent_msg_id, usage.output_tokens as i64).await;
+                Self::update_tokens_used(&self.db, msg_id, usage.output_tokens as i64).await;
             }
         }
 
-        // 7. Extract and store facts in long-term memory (background task)
-        self.spawn_fact_extraction(user_message, &full_response, &user_msg_id, &agent_msg_id);
+        // 8. Extract and store facts in long-term memory (background task)
+        if let Some(ref agent_id) = agent_msg_id {
+            self.spawn_fact_extraction(user_message, &full_response, &user_msg_id, agent_id);
+        }
 
         // Set completion attributes on parent span for Langfuse Input/Output display
         current_span.set_attribute("gen_ai.completion.0.role", "assistant");
@@ -907,12 +1197,13 @@ Remember: You are building a long-term relationship with this user."#,
         )
     }
 
-    /// Helper: Load recent messages from database for working memory initialization
+    /// Helper: Load recent messages from database for working memory initialization.
+    /// Includes metadata column to restore tool call/result information.
     async fn load_recent_messages_from_db(db: &Pool<Sqlite>, limit: i32) -> Result<Vec<Message>> {
         let rows = sqlx::query(
             r#"
             SELECT * FROM (
-                SELECT id, role, content, timestamp, importance_score
+                SELECT id, role, content, timestamp, importance_score, metadata
                 FROM messages
                 ORDER BY timestamp DESC
                 LIMIT ?
@@ -926,12 +1217,18 @@ Remember: You are building a long-term relationship with this user."#,
 
         let messages: Vec<Message> = rows
             .into_iter()
-            .map(|row| Message {
-                id: row.get("id"),
-                role: row.get("role"),
-                content: row.get("content"),
-                timestamp: row.get("timestamp"),
-                importance_score: row.get("importance_score"),
+            .map(|row| {
+                let metadata_str: Option<String> = row.get("metadata");
+                let metadata =
+                    metadata_str.and_then(|s| serde_json::from_str::<MessageMetadata>(&s).ok());
+                Message {
+                    id: row.get("id"),
+                    role: row.get("role"),
+                    content: row.get("content"),
+                    timestamp: row.get("timestamp"),
+                    importance_score: row.get("importance_score"),
+                    metadata,
+                }
             })
             .collect();
 
@@ -942,23 +1239,159 @@ Remember: You are building a long-term relationship with this user."#,
         Ok(messages)
     }
 
-    /// Helper: Save message to database with a specific ID.
-    /// This ensures the same ID is used in both the DB and working memory,
-    /// so that FOREIGN KEY constraints in summaries work correctly.
-    async fn save_message_with_id(&self, id: &str, role: &str, content: &str) -> Result<()> {
+    /// Helper: Save a Message to the database, including metadata as JSON.
+    async fn save_message_to_db(&self, msg: &Message) -> Result<()> {
+        let metadata_json = msg
+            .metadata
+            .as_ref()
+            .and_then(|m| serde_json::to_string(m).ok());
+
         sqlx::query(
-            "INSERT INTO messages (id, role, content, timestamp) 
-             VALUES (?, ?, ?, ?)",
+            "INSERT INTO messages (id, role, content, timestamp, metadata) VALUES (?, ?, ?, ?, ?)",
         )
-        .bind(id)
-        .bind(role)
-        .bind(content)
-        .bind(Utc::now())
+        .bind(&msg.id)
+        .bind(&msg.role)
+        .bind(&msg.content)
+        .bind(msg.timestamp)
+        .bind(metadata_json)
         .execute(&self.db)
         .await
         .context("Failed to save message")?;
 
         Ok(())
+    }
+
+    /// Convert a rig Message (from history) into our DB Message(s).
+    /// Assistant messages with tool calls -> one agent message with ToolCalls metadata.
+    /// User messages with tool results -> one tool_result message per result.
+    fn rig_message_to_db_messages(rig_msg: &RigMessage) -> Vec<Message> {
+        match rig_msg {
+            RigMessage::Assistant { content, .. } => {
+                let mut text_parts = Vec::new();
+                let mut tool_calls = Vec::new();
+
+                for item in content.iter() {
+                    match item {
+                        AssistantContent::Text(t) => text_parts.push(t.text.clone()),
+                        AssistantContent::ToolCall(tc) => {
+                            tool_calls.push(ToolCallData {
+                                id: tc.id.clone(),
+                                call_id: tc.call_id.clone(),
+                                name: tc.function.name.clone(),
+                                arguments: tc.function.arguments.clone(),
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+
+                let content_text = text_parts.join("");
+                let metadata = if !tool_calls.is_empty() {
+                    Some(MessageMetadata::ToolCalls { calls: tool_calls })
+                } else {
+                    None
+                };
+
+                vec![Message {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    role: "agent".to_string(),
+                    content: content_text,
+                    timestamp: Utc::now(),
+                    importance_score: None,
+                    metadata,
+                }]
+            }
+            RigMessage::User { content } => {
+                let mut messages = Vec::new();
+
+                for item in content.iter() {
+                    if let UserContent::ToolResult(tr) = item {
+                        let result_text = tr
+                            .content
+                            .iter()
+                            .map(|c| match c {
+                                RigToolResultContent::Text(t) => t.text.clone(),
+                                _ => String::new(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join("");
+
+                        messages.push(Message {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            role: "tool_result".to_string(),
+                            content: result_text,
+                            timestamp: Utc::now(),
+                            importance_score: None,
+                            metadata: Some(MessageMetadata::ToolResult(ToolResultData {
+                                tool_call_id: tr.id.clone(),
+                                call_id: tr.call_id.clone(),
+                            })),
+                        });
+                    }
+                }
+
+                messages
+            }
+        }
+    }
+
+    /// Convert a DB Message back to a rig Message for history reconstruction.
+    /// Handles tool_calls metadata on agent messages and tool_result role messages
+    /// to produce properly structured rig Messages that preserve the tool-use protocol.
+    fn db_message_to_rig_message(msg: &Message) -> RigMessage {
+        match msg.role.as_str() {
+            "agent" => {
+                if let Some(MessageMetadata::ToolCalls { ref calls }) = msg.metadata {
+                    // Agent message with tool calls: reconstruct AssistantContent with ToolCall items
+                    let mut content_items: Vec<AssistantContent> = Vec::new();
+                    if !msg.content.is_empty() {
+                        content_items.push(AssistantContent::Text(RigText {
+                            text: msg.content.clone(),
+                        }));
+                    }
+                    for call in calls {
+                        content_items.push(AssistantContent::ToolCall(RigToolCall {
+                            id: call.id.clone(),
+                            call_id: call.call_id.clone(),
+                            function: RigToolFunction {
+                                name: call.name.clone(),
+                                arguments: call.arguments.clone(),
+                            },
+                            signature: None,
+                            additional_params: None,
+                        }));
+                    }
+                    let mut content = OneOrMany::one(content_items.remove(0));
+                    for item in content_items {
+                        content.push(item);
+                    }
+                    RigMessage::Assistant { id: None, content }
+                } else {
+                    // Plain text agent message
+                    RigMessage::assistant(&msg.content)
+                }
+            }
+            "tool_result" => {
+                if let Some(MessageMetadata::ToolResult(ref tr_data)) = msg.metadata {
+                    RigMessage::User {
+                        content: OneOrMany::one(UserContent::ToolResult(RigToolResult {
+                            id: tr_data.tool_call_id.clone(),
+                            call_id: tr_data.call_id.clone(),
+                            content: OneOrMany::one(RigToolResultContent::Text(RigText {
+                                text: msg.content.clone(),
+                            })),
+                        })),
+                    }
+                } else {
+                    // Fallback: treat as user message
+                    RigMessage::user(&msg.content)
+                }
+            }
+            _ => {
+                // "user" or any other role
+                RigMessage::user(&msg.content)
+            }
+        }
     }
 
     /// Public mutable accessor for context builder (used by memory commands)

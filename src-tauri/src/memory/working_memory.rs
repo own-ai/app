@@ -1,6 +1,39 @@
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
+/// Serializable tool call data stored in message metadata.
+/// Used for agent messages that include tool calls.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallData {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<String>,
+    pub name: String,
+    pub arguments: serde_json::Value,
+}
+
+/// Serializable tool result reference stored in message metadata.
+/// Used for tool_result messages to link back to the originating tool call.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolResultData {
+    pub tool_call_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<String>,
+}
+
+/// Message metadata stored as JSON in the database.
+/// Enables round-tripping tool call information through DB persistence.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum MessageMetadata {
+    /// Agent message that includes one or more tool calls
+    #[serde(rename = "tool_calls")]
+    ToolCalls { calls: Vec<ToolCallData> },
+    /// Tool result message (role = "tool_result")
+    #[serde(rename = "tool_result")]
+    ToolResult(ToolResultData),
+}
+
 /// Message structure for working memory
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
@@ -10,6 +43,8 @@ pub struct Message {
     pub timestamp: chrono::DateTime<chrono::Utc>,
     /// 0.0-1.0, None if not yet evaluated or no facts extracted
     pub importance_score: Option<f32>,
+    /// JSON metadata for tool calls / tool results
+    pub metadata: Option<MessageMetadata>,
 }
 
 /// Working Memory manages a rolling window of recent messages
@@ -157,6 +192,7 @@ mod tests {
             content: content.to_string(),
             timestamp: Utc::now(),
             importance_score: None,
+            metadata: None,
         }
     }
 
@@ -167,6 +203,7 @@ mod tests {
             content: content.to_string(),
             timestamp: Utc::now(),
             importance_score: None,
+            metadata: None,
         }
     }
 

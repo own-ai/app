@@ -401,6 +401,7 @@ mod tests {
             content: content.to_string(),
             timestamp: Utc::now(),
             importance_score: None,
+            metadata: None,
         }
     }
 
