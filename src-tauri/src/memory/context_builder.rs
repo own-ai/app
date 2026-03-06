@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::{DateTime, Local, Utc};
 
 use crate::tools::planning::SharedTodoList;
 
@@ -36,7 +37,27 @@ impl ContextBuilder {
     pub async fn build_context(&self, user_query: &str) -> Result<String> {
         let mut context_parts = Vec::new();
 
-        // 0. Active TODO list (if any)
+        // 1. Temporal context: current date/time in user's local timezone
+        let now = Utc::now();
+        let local_now = Local::now();
+        context_parts.push(format!(
+            "## Current Date and Time\n{}\n\n",
+            local_now.format("%A, %Y-%m-%d %H:%M %:z")
+        ));
+
+        // Check for significant time gap since last message in working memory
+        let wm_messages = self.working_memory.get_context();
+        if let Some(last_msg) = wm_messages.last() {
+            let gap = now.signed_duration_since(last_msg.timestamp);
+            if let Some(gap_description) = Self::format_time_gap(gap, &last_msg.timestamp) {
+                context_parts.push(format!(
+                    "## Time Since Last Conversation\n{}\n\n",
+                    gap_description
+                ));
+            }
+        }
+
+        // 2. Active TODO list (if any)
         if let Some(ref todo_list) = self.todo_list {
             let list_guard = todo_list.read().await;
             if let Some(ref list) = *list_guard {
@@ -46,7 +67,7 @@ impl ContextBuilder {
             }
         }
 
-        // 1. Long-term memories (semantically relevant)
+        // 3. Long-term memories (semantically relevant)
         let memories = {
             let mut ltm = self.long_term_memory.lock().await;
             ltm.recall(user_query, 10, 0.5).await?
@@ -63,7 +84,7 @@ impl ContextBuilder {
             context_parts.push("\n".to_string());
         }
 
-        // 2. Recent summaries (3 most recent by timestamp)
+        // 4. Recent summaries (3 most recent by timestamp)
         let recent_summaries = self.get_recent_summaries(3).await?;
         let recent_ids: Vec<String> = recent_summaries.iter().map(|s| s.id.clone()).collect();
 
@@ -79,7 +100,7 @@ impl ContextBuilder {
             context_parts.push("\n".to_string());
         }
 
-        // 3. Semantically relevant older summary (if not already in recent 3)
+        // 5. Semantically relevant older summary (if not already in recent 3)
         {
             let ltm = self.long_term_memory.lock().await;
             match ltm.embed_text(user_query) {
@@ -157,5 +178,222 @@ impl ContextBuilder {
     /// Get mutable summarization agent reference (e.g. to set the extractor)
     pub fn summarization_agent_mut(&mut self) -> &mut SummarizationAgent {
         &mut self.summarization_agent
+    }
+
+    /// Format a time gap into a human-readable description for the LLM.
+    /// Returns `None` if the gap is less than 1 hour (not significant enough to mention).
+    fn format_time_gap(gap: chrono::TimeDelta, last_timestamp: &DateTime<Utc>) -> Option<String> {
+        let total_minutes = gap.num_minutes();
+        let total_hours = gap.num_hours();
+        let total_days = gap.num_days();
+
+        if total_minutes < 60 {
+            // Less than 1 hour -- not significant, no mention needed
+            return None;
+        }
+
+        let last_local = last_timestamp.with_timezone(&Local);
+        let last_date = last_local.format("%A, %Y-%m-%d at %H:%M");
+
+        let gap_text = if total_days >= 30 {
+            let months = total_days / 30;
+            if months == 1 {
+                "about 1 month ago".to_string()
+            } else {
+                format!("about {} months ago", months)
+            }
+        } else if total_days >= 7 {
+            let weeks = total_days / 7;
+            if weeks == 1 {
+                "about 1 week ago".to_string()
+            } else {
+                format!("about {} weeks ago", weeks)
+            }
+        } else if total_days >= 1 {
+            if total_days == 1 {
+                "yesterday".to_string()
+            } else {
+                format!("{} days ago", total_days)
+            }
+        } else {
+            // 1-23 hours
+            if total_hours == 1 {
+                "about 1 hour ago".to_string()
+            } else {
+                format!("about {} hours ago", total_hours)
+            }
+        };
+
+        Some(format!(
+            "The last message in this conversation was {} ({}).\n\
+             The user is returning after a break. Acknowledge the time gap naturally \
+             if appropriate, but do not overemphasize it.",
+            gap_text, last_date
+        ))
+    }
+
+    /// Format a time gap between two consecutive messages as a short marker.
+    /// Returns `None` if the gap is less than 4 hours (not significant for history).
+    /// These markers are inserted into the chat history so the LLM can see
+    /// temporal breaks between messages.
+    pub fn format_history_time_marker(gap: chrono::TimeDelta) -> Option<String> {
+        let total_hours = gap.num_hours();
+        let total_days = gap.num_days();
+
+        if total_hours < 4 {
+            return None;
+        }
+
+        let marker = if total_days >= 30 {
+            let months = total_days / 30;
+            if months == 1 {
+                "about 1 month later".to_string()
+            } else {
+                format!("about {} months later", months)
+            }
+        } else if total_days >= 7 {
+            let weeks = total_days / 7;
+            if weeks == 1 {
+                "about 1 week later".to_string()
+            } else {
+                format!("about {} weeks later", weeks)
+            }
+        } else if total_days >= 1 {
+            if total_days == 1 {
+                "next day".to_string()
+            } else {
+                format!("{} days later", total_days)
+            }
+        } else {
+            format!("{} hours later", total_hours)
+        };
+
+        Some(format!("[--- {} ---]", marker))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeDelta;
+
+    #[test]
+    fn test_format_time_gap_under_1_hour_returns_none() {
+        let now = Utc::now();
+        let gap = TimeDelta::minutes(30);
+        assert!(ContextBuilder::format_time_gap(gap, &now).is_none());
+    }
+
+    #[test]
+    fn test_format_time_gap_under_1_minute_returns_none() {
+        let now = Utc::now();
+        let gap = TimeDelta::seconds(45);
+        assert!(ContextBuilder::format_time_gap(gap, &now).is_none());
+    }
+
+    #[test]
+    fn test_format_time_gap_1_hour() {
+        let now = Utc::now();
+        let gap = TimeDelta::hours(1);
+        let result = ContextBuilder::format_time_gap(gap, &now).unwrap();
+        assert!(result.contains("about 1 hour ago"));
+        assert!(result.contains("returning after a break"));
+    }
+
+    #[test]
+    fn test_format_time_gap_several_hours() {
+        let now = Utc::now();
+        let gap = TimeDelta::hours(5);
+        let result = ContextBuilder::format_time_gap(gap, &now).unwrap();
+        assert!(result.contains("about 5 hours ago"));
+    }
+
+    #[test]
+    fn test_format_time_gap_yesterday() {
+        let now = Utc::now();
+        let gap = TimeDelta::days(1);
+        let result = ContextBuilder::format_time_gap(gap, &now).unwrap();
+        assert!(result.contains("yesterday"));
+    }
+
+    #[test]
+    fn test_format_time_gap_several_days() {
+        let now = Utc::now();
+        let gap = TimeDelta::days(3);
+        let result = ContextBuilder::format_time_gap(gap, &now).unwrap();
+        assert!(result.contains("3 days ago"));
+    }
+
+    #[test]
+    fn test_format_time_gap_1_week() {
+        let now = Utc::now();
+        let gap = TimeDelta::weeks(1);
+        let result = ContextBuilder::format_time_gap(gap, &now).unwrap();
+        assert!(result.contains("about 1 week ago"));
+    }
+
+    #[test]
+    fn test_format_time_gap_several_weeks() {
+        let now = Utc::now();
+        let gap = TimeDelta::weeks(3);
+        let result = ContextBuilder::format_time_gap(gap, &now).unwrap();
+        assert!(result.contains("about 3 weeks ago"));
+    }
+
+    #[test]
+    fn test_format_time_gap_1_month() {
+        let now = Utc::now();
+        let gap = TimeDelta::days(35);
+        let result = ContextBuilder::format_time_gap(gap, &now).unwrap();
+        assert!(result.contains("about 1 month ago"));
+    }
+
+    #[test]
+    fn test_format_time_gap_several_months() {
+        let now = Utc::now();
+        let gap = TimeDelta::days(90);
+        let result = ContextBuilder::format_time_gap(gap, &now).unwrap();
+        assert!(result.contains("about 3 months ago"));
+    }
+
+    #[test]
+    fn test_format_history_time_marker_under_4_hours_returns_none() {
+        let gap = TimeDelta::hours(3);
+        assert!(ContextBuilder::format_history_time_marker(gap).is_none());
+    }
+
+    #[test]
+    fn test_format_history_time_marker_4_hours() {
+        let gap = TimeDelta::hours(4);
+        let result = ContextBuilder::format_history_time_marker(gap).unwrap();
+        assert_eq!(result, "[--- 4 hours later ---]");
+    }
+
+    #[test]
+    fn test_format_history_time_marker_next_day() {
+        let gap = TimeDelta::days(1);
+        let result = ContextBuilder::format_history_time_marker(gap).unwrap();
+        assert_eq!(result, "[--- next day ---]");
+    }
+
+    #[test]
+    fn test_format_history_time_marker_several_days() {
+        let gap = TimeDelta::days(5);
+        let result = ContextBuilder::format_history_time_marker(gap).unwrap();
+        assert_eq!(result, "[--- 5 days later ---]");
+    }
+
+    #[test]
+    fn test_format_history_time_marker_1_week() {
+        let gap = TimeDelta::weeks(1);
+        let result = ContextBuilder::format_history_time_marker(gap).unwrap();
+        assert_eq!(result, "[--- about 1 week later ---]");
+    }
+
+    #[test]
+    fn test_format_history_time_marker_1_month() {
+        let gap = TimeDelta::days(35);
+        let result = ContextBuilder::format_history_time_marker(gap).unwrap();
+        assert_eq!(result, "[--- about 1 month later ---]");
     }
 }

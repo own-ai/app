@@ -69,6 +69,18 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
 
 ## Recent Changes
 
+- **Temporal Context for LLM (Post-Phase 4)**:
+  - **Problem**: The LLM had no awareness of time -- it received chat history as a flat list without timestamps. After a week-long break, the AI would continue as if the conversation just happened, leading to unnatural responses.
+  - **Solution**: Three-part temporal awareness system, all invisible to the user (only sent to the LLM):
+    1. **Current Date/Time**: Always included at the top of the context string in the user's local timezone (via `chrono::Local`), e.g. "Friday, 2026-03-06 13:08 +01:00"
+    2. **Time Since Last Conversation**: If the last message is >= 1 hour old, a descriptive note is added (e.g. "The last message was 3 days ago. The user is returning after a break.")
+    3. **History Time Markers**: When consecutive messages in the chat history have a gap >= 4 hours, a marker like `[--- 3 days later ---]` is prepended to the next message's content
+  - **Files changed**:
+    - `memory/context_builder.rs`: `build_context()` now starts with temporal context sections; new `format_time_gap()` (returns None if < 1h) and `format_history_time_marker()` (returns None if < 4h) methods; 16 unit tests
+    - `agent/mod.rs`: New `build_history_with_time_markers()` method replaces flat history building in both `chat_inner()` and `stream_chat_inner()`
+  - **Architecture**: Time markers are prepended to message content (not inserted as separate messages) to preserve the user/assistant alternation pattern required by LLM APIs. Local timezone via `chrono::Local::now()` uses the OS timezone setting.
+  - All 234 Rust tests pass, cargo build clean
+
 - **Database Pool Caching (Post-Phase 4)**:
   - **Problem**: 13 Tauri commands and scheduler runner called `init_database()` on every invocation, creating a new `SqlitePool` and running migration checks each time -- redundant since the DB is already initialized on first access
   - **Solution**: Introduced `DbCache` (`Arc<Mutex<HashMap<String, Pool<Sqlite>>>>`) as Tauri managed state

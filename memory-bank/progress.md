@@ -97,6 +97,7 @@
 - [x] Agent `.name()` set on all provider builders for proper Langfuse trace naming
 - [x] LangfuseContext helper with session_id, tags, metadata for trace enrichment
 - [x] Database Pool Caching: `DbCache` type as Tauri managed state, `get_or_init_db()` caches pools per instance, eliminates 13 redundant `init_database()` calls across commands and scheduler
+- [x] Temporal Context: LLM receives current date/time (local timezone), time-since-last-conversation hint (>= 1h), and history time gap markers (>= 4h) -- invisible to user, 16 tests
 
 ## What's Left to Build
 

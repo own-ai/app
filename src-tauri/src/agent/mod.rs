@@ -563,6 +563,46 @@ impl OwnAIAgent {
         Ok(())
     }
 
+    /// Build chat history from working memory messages, inserting time gap markers
+    /// between messages that have significant temporal gaps (>= 4 hours).
+    /// The markers are prepended to the following message's content so the LLM
+    /// can see where temporal breaks occurred without altering the user/assistant
+    /// alternation pattern. The last message in working memory (the current user
+    /// message) is excluded since it becomes the prompt.
+    fn build_history_with_time_markers(&self) -> Vec<RigMessage> {
+        let messages = self.context_builder.working_memory().get_context();
+        let msg_count = messages.len();
+        if msg_count <= 1 {
+            return Vec::new();
+        }
+
+        let history_messages = &messages[..msg_count - 1];
+        let mut history = Vec::with_capacity(history_messages.len());
+
+        for (i, msg) in history_messages.iter().enumerate() {
+            let mut content = msg.content.clone();
+
+            // Check time gap from previous message
+            if i > 0 {
+                let gap = msg
+                    .timestamp
+                    .signed_duration_since(history_messages[i - 1].timestamp);
+                if let Some(marker) = crate::memory::ContextBuilder::format_history_time_marker(gap)
+                {
+                    content = format!("{}\n{}", marker, content);
+                }
+            }
+
+            if msg.role == "user" {
+                history.push(RigMessage::user(&content));
+            } else {
+                history.push(RigMessage::assistant(&content));
+            }
+        }
+
+        history
+    }
+
     /// Add a message to working memory; if eviction occurs, summarize in background
     async fn add_to_working_memory(&mut self, msg: Message) {
         if let Some(evicted) = self.context_builder.working_memory_mut().add_message(msg) {
@@ -617,19 +657,8 @@ impl OwnAIAgent {
         // 3. Build context from all memory layers
         let context = self.context_builder.build_context(user_message).await?;
 
-        // 4. Build chat history from working memory
-        let messages = self.context_builder.working_memory().get_context();
-        let mut history: Vec<RigMessage> = messages
-            .iter()
-            .take(messages.len().saturating_sub(1))
-            .map(|msg| {
-                if msg.role == "user" {
-                    RigMessage::user(&msg.content)
-                } else {
-                    RigMessage::assistant(&msg.content)
-                }
-            })
-            .collect();
+        // 4. Build chat history from working memory (with time gap markers)
+        let mut history = self.build_history_with_time_markers();
 
         // 5. Prepare prompt with memory context
         let prompt = if !context.is_empty() {
@@ -739,19 +768,8 @@ impl OwnAIAgent {
         // 2. Build context
         let context = self.context_builder.build_context(user_message).await?;
 
-        // 3. Convert working memory to rig messages for chat history
-        let messages = self.context_builder.working_memory().get_context();
-        let history: Vec<RigMessage> = messages
-            .iter()
-            .take(messages.len().saturating_sub(1))
-            .map(|msg| {
-                if msg.role == "user" {
-                    RigMessage::user(&msg.content)
-                } else {
-                    RigMessage::assistant(&msg.content)
-                }
-            })
-            .collect();
+        // 3. Build chat history from working memory (with time gap markers)
+        let history = self.build_history_with_time_markers();
 
         // 4. Prepare prompt with memory context
         let prompt = if !context.is_empty() {
