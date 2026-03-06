@@ -6,7 +6,7 @@ use crate::ai_instances::AIInstanceManager;
 use crate::canvas::bridge::{self, BridgeResponse};
 use crate::canvas::storage;
 use crate::canvas::ProgramMetadata;
-use crate::commands::chat::AgentCache;
+use crate::commands::chat::{get_or_create_agent, AgentCache};
 use crate::database::{get_or_init_db, DbCache};
 use crate::utils::paths;
 
@@ -106,33 +106,18 @@ pub async fn bridge_request(
                 .ok_or("Missing 'prompt' parameter")?
                 .to_string();
 
-            // Get instance
-            let manager = instance_manager.lock().await;
-            let instance = manager
-                .get_instance(&instance_id)
-                .ok_or_else(|| format!("Instance not found: {}", instance_id))?
-                .clone();
-            drop(manager);
+            // Get or create agent (cache lock released immediately)
+            let agent_arc = get_or_create_agent(
+                &instance_id,
+                instance_manager.inner(),
+                agent_cache.inner(),
+                db_cache.inner(),
+                &app_handle,
+            )
+            .await?;
 
-            // Get or create agent
-            let mut cache = agent_cache.lock().await;
-
-            if !cache.contains_key(&instance_id) {
-                let agent = crate::agent::OwnAIAgent::new(
-                    &instance,
-                    pool.clone(),
-                    None,
-                    Some(app_handle.clone()),
-                )
-                .await
-                .map_err(|e| format!("Failed to create agent: {}", e))?;
-
-                cache.insert(instance_id.clone(), agent);
-            }
-
-            let agent = cache
-                .get_mut(&instance_id)
-                .ok_or("Agent not found in cache")?;
+            // Lock only this instance's agent for the chat call
+            let mut agent = agent_arc.lock().await;
 
             match agent.chat(&prompt).await {
                 Ok(response) => Ok(BridgeResponse::ok(serde_json::Value::String(response))),

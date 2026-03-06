@@ -32,17 +32,21 @@ pub async fn get_memory_stats(
     agent_cache: State<'_, AgentCache>,
     db_cache: State<'_, DbCache>,
 ) -> Result<MemoryStats, String> {
-    let cache = agent_cache.lock().await;
-
-    // Get working memory stats from the agent (if it exists in cache)
-    let (wm_count, wm_tokens, wm_utilization) = if let Some(agent) = cache.get(&instance_id) {
-        let wm = agent.context_builder().working_memory();
-        (wm.message_count(), wm.current_tokens(), wm.utilization())
-    } else {
-        (0, 0, 0.0)
+    // Read-lock the cache briefly to clone the Arc, then release it
+    // before locking the agent (avoids holding cache lock during agent wait).
+    let (wm_count, wm_tokens, wm_utilization) = {
+        let agent_arc = {
+            let cache = agent_cache.read().await;
+            cache.get(&instance_id).cloned()
+        };
+        if let Some(agent_arc) = agent_arc {
+            let agent = agent_arc.lock().await;
+            let wm = agent.context_builder().working_memory();
+            (wm.message_count(), wm.current_tokens(), wm.utilization())
+        } else {
+            (0, 0, 0.0)
+        }
     };
-
-    drop(cache);
 
     // Get DB-based stats (summaries count, long-term memory count)
     let db = get_or_init_db(&db_cache, &instance_id)
@@ -76,16 +80,22 @@ pub async fn search_memory(
     limit: usize,
     agent_cache: State<'_, AgentCache>,
 ) -> Result<Vec<MemorySearchResult>, String> {
-    let cache = agent_cache.lock().await;
+    // Read-lock cache briefly to get the agent Arc, then lock agent briefly
+    // to clone the shared long-term memory reference.
+    let long_term_memory = {
+        let cache = agent_cache.read().await;
+        let agent_arc = cache
+            .get(&instance_id)
+            .ok_or_else(|| "Agent not in cache - please send a message first".to_string())?
+            .clone();
+        drop(cache); // Release cache lock
 
-    // Agent must be in cache (which contains the embedder in long-term memory)
-    let agent = cache
-        .get(&instance_id)
-        .ok_or_else(|| "Agent not in cache - please send a message first".to_string())?;
+        let agent = agent_arc.lock().await;
+        agent.context_builder().long_term_memory().clone()
+        // agent lock dropped here
+    };
 
-    // Perform semantic search via shared long-term memory
-    let long_term_memory = agent.context_builder().long_term_memory().clone();
-    drop(cache); // Release cache lock before awaiting the memory lock
+    // Perform semantic search (no cache or agent lock held)
     let mut mem = long_term_memory.lock().await;
     let memories = mem
         .recall(&query, limit, 0.0) // min_importance = 0.0 to include all
@@ -115,12 +125,18 @@ pub async fn add_memory_entry(
     importance: f32,
     agent_cache: State<'_, AgentCache>,
 ) -> Result<String, String> {
-    let cache = agent_cache.lock().await;
+    // Read-lock cache briefly, then lock agent briefly to clone shared ref
+    let long_term_memory = {
+        let cache = agent_cache.read().await;
+        let agent_arc = cache
+            .get(&instance_id)
+            .ok_or_else(|| "Agent not in cache - please send a message first".to_string())?
+            .clone();
+        drop(cache);
 
-    // Agent must be in cache
-    let agent = cache
-        .get(&instance_id)
-        .ok_or_else(|| "Agent not in cache - please send a message first".to_string())?;
+        let agent = agent_arc.lock().await;
+        agent.context_builder().long_term_memory().clone()
+    };
 
     // Parse entry type
     let memory_type = fact_extraction::parse_memory_type(&entry_type);
@@ -141,9 +157,7 @@ pub async fn add_memory_entry(
 
     let entry_id = entry.id.clone();
 
-    // Store in long-term memory via shared reference
-    let long_term_memory = agent.context_builder().long_term_memory().clone();
-    drop(cache); // Release cache lock before awaiting the memory lock
+    // Store in long-term memory (no cache or agent lock held)
     let mut mem = long_term_memory.lock().await;
     mem.store(entry)
         .await
@@ -161,16 +175,20 @@ pub async fn delete_memory_entry(
     entry_id: String,
     agent_cache: State<'_, AgentCache>,
 ) -> Result<(), String> {
-    let cache = agent_cache.lock().await;
+    // Read-lock cache briefly, then lock agent briefly to clone shared ref
+    let long_term_memory = {
+        let cache = agent_cache.read().await;
+        let agent_arc = cache
+            .get(&instance_id)
+            .ok_or_else(|| "Agent not in cache - please send a message first".to_string())?
+            .clone();
+        drop(cache);
 
-    // Agent must be in cache
-    let agent = cache
-        .get(&instance_id)
-        .ok_or_else(|| "Agent not in cache - please send a message first".to_string())?;
+        let agent = agent_arc.lock().await;
+        agent.context_builder().long_term_memory().clone()
+    };
 
-    // Delete from long-term memory via shared reference
-    let long_term_memory = agent.context_builder().long_term_memory().clone();
-    drop(cache); // Release cache lock before awaiting the memory lock
+    // Delete from long-term memory (no cache or agent lock held)
     let mem = long_term_memory.lock().await;
     mem.delete(&entry_id)
         .await

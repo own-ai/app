@@ -90,8 +90,9 @@ pub fn run() {
             let shared_manager = Arc::new(Mutex::new(manager));
             app.manage(shared_manager.clone());
 
-            // Initialize Agent Cache
-            let agent_cache: commands::chat::AgentCache = Arc::new(Mutex::new(HashMap::new()));
+            // Initialize Agent Cache (RwLock outer, per-instance Mutex inner)
+            let agent_cache: commands::chat::AgentCache =
+                Arc::new(tokio::sync::RwLock::new(HashMap::new()));
             app.manage(agent_cache);
 
             // Initialize Database Cache (pools per instance, avoids repeated init_database())

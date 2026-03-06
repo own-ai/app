@@ -2,12 +2,17 @@
 //!
 //! All commands access the per-instance tool registry through the AgentCache,
 //! ensuring each AI instance has its own isolated set of dynamic tools.
+//!
+//! The cache is read-locked briefly to obtain the per-instance `Arc<Mutex<OwnAIAgent>>`,
+//! then the agent is locked to clone the `SharedRegistry`. Both locks are released
+//! before any potentially long-running registry operations.
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use super::chat::AgentCache;
 use crate::tools::registry::ParameterDef;
+use crate::tools::rhai_bridge_tool::SharedRegistry;
 
 /// Serializable tool info for the frontend.
 #[derive(Debug, Serialize, Deserialize)]
@@ -25,20 +30,33 @@ pub struct ToolInfo {
     pub last_used: Option<String>,
 }
 
+/// Helper: read-lock the cache briefly and clone the SharedRegistry from the agent.
+/// Both cache and agent locks are released before returning.
+async fn get_registry(
+    instance_id: &str,
+    agent_cache: &AgentCache,
+) -> Result<SharedRegistry, String> {
+    let cache = agent_cache.read().await;
+    let agent_arc = cache
+        .get(instance_id)
+        .ok_or_else(|| "Agent not in cache - please send a message first".to_string())?
+        .clone();
+    drop(cache);
+
+    let agent = agent_arc.lock().await;
+    Ok(agent.tool_registry().clone())
+}
+
 /// List all active dynamic tools for an instance.
 #[tauri::command]
 pub async fn list_dynamic_tools(
     instance_id: String,
     agent_cache: State<'_, AgentCache>,
 ) -> Result<Vec<ToolInfo>, String> {
-    let cache = agent_cache.lock().await;
+    let registry = get_registry(&instance_id, agent_cache.inner()).await?;
 
-    let agent = cache
-        .get(&instance_id)
-        .ok_or_else(|| "Agent not in cache - please send a message first".to_string())?;
-
-    let registry = agent.tool_registry().read().await;
-    let tools = registry
+    let reg = registry.read().await;
+    let tools = reg
         .list_tools(None)
         .await
         .map_err(|e| format!("Failed to list tools: {}", e))?;
@@ -71,14 +89,10 @@ pub async fn create_dynamic_tool(
     parameters: Vec<ParameterDef>,
     agent_cache: State<'_, AgentCache>,
 ) -> Result<ToolInfo, String> {
-    let cache = agent_cache.lock().await;
+    let registry = get_registry(&instance_id, agent_cache.inner()).await?;
 
-    let agent = cache
-        .get(&instance_id)
-        .ok_or_else(|| "Agent not in cache - please send a message first".to_string())?;
-
-    let mut registry = agent.tool_registry().write().await;
-    let tool = registry
+    let mut reg = registry.write().await;
+    let tool = reg
         .register_tool(&name, &description, &script_content, parameters)
         .await
         .map_err(|e| format!("Failed to create tool: {}", e))?;
@@ -111,15 +125,10 @@ pub async fn delete_dynamic_tool(
     name: String,
     agent_cache: State<'_, AgentCache>,
 ) -> Result<(), String> {
-    let cache = agent_cache.lock().await;
+    let registry = get_registry(&instance_id, agent_cache.inner()).await?;
 
-    let agent = cache
-        .get(&instance_id)
-        .ok_or_else(|| "Agent not in cache - please send a message first".to_string())?;
-
-    let mut registry = agent.tool_registry().write().await;
-    registry
-        .delete_tool(&name)
+    let mut reg = registry.write().await;
+    reg.delete_tool(&name)
         .await
         .map_err(|e| format!("Failed to delete tool: {}", e))?;
 
@@ -142,14 +151,10 @@ pub async fn update_dynamic_tool(
     parameters: Option<Vec<ParameterDef>>,
     agent_cache: State<'_, AgentCache>,
 ) -> Result<ToolInfo, String> {
-    let cache = agent_cache.lock().await;
+    let registry = get_registry(&instance_id, agent_cache.inner()).await?;
 
-    let agent = cache
-        .get(&instance_id)
-        .ok_or_else(|| "Agent not in cache - please send a message first".to_string())?;
-
-    let mut registry = agent.tool_registry().write().await;
-    let tool = registry
+    let mut reg = registry.write().await;
+    let tool = reg
         .update_tool(&name, &script_content, description.as_deref(), parameters)
         .await
         .map_err(|e| format!("Failed to update tool: {}", e))?;
@@ -184,15 +189,10 @@ pub async fn execute_dynamic_tool(
     params: serde_json::Value,
     agent_cache: State<'_, AgentCache>,
 ) -> Result<String, String> {
-    let cache = agent_cache.lock().await;
+    let registry = get_registry(&instance_id, agent_cache.inner()).await?;
 
-    let agent = cache
-        .get(&instance_id)
-        .ok_or_else(|| "Agent not in cache - please send a message first".to_string())?;
-
-    let mut registry = agent.tool_registry().write().await;
-    registry
-        .execute_tool(&name, params)
+    let mut reg = registry.write().await;
+    reg.execute_tool(&name, params)
         .await
         .map_err(|e| format!("Tool execution failed: {}", e))
 }
