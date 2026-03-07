@@ -157,6 +157,15 @@ app/
 │
 ├── src-tauri/                    # Rust backend
 │   ├── src/
+│   │   ├── agent/                # ownAI Agent (LLM + Memory + Tools)
+│   │   │   ├── mod.rs            # Agent struct, constructor, accessors, fact extraction
+│   │   │   ├── providers.rs      # AgentProvider, SummaryExtractorProvider, FactExtractorProvider
+│   │   │   ├── tools.rs          # create_tools() - tool registration for agent
+│   │   │   ├── system_prompt.rs  # System prompt generation
+│   │   │   ├── chat.rs           # Non-streaming chat (chat, chat_inner)
+│   │   │   ├── streaming.rs      # Streaming chat + process_stream! macro
+│   │   │   ├── history.rs        # Chat history building, message conversion
+│   │   │   └── persistence.rs    # DB load/save/update for messages
 │   │   ├── ai_instances/         # AI instance management
 │   │   │   ├── manager.rs        # Instance CRUD operations
 │   │   │   └── models.rs         # Instance data structures

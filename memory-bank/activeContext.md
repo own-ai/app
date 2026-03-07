@@ -180,6 +180,20 @@ The project has **completed Phase 1 (Foundation)**, **Phase 2 (Memory System)**,
   - Files changed: `src-tauri/src/agent/mod.rs`
   - All 234 Rust tests pass, cargo build clean
 
+- **Agent Module Split (Post-Phase 4)**:
+  - **Purpose**: Split the monolithic `agent/mod.rs` (~1536 lines) into 8 focused files for better maintainability
+  - **New file structure**:
+    - `agent/mod.rs` (464 lines): Module declarations, struct definition (pub(crate) fields), new(), accessors, attach_langfuse_context(), summarize_evicted(), add_to_working_memory(), spawn_fact_extraction()
+    - `agent/providers.rs` (58 lines): AgentProvider, SummaryExtractorProvider, FactExtractorProvider enums
+    - `agent/tools.rs` (144 lines): create_tools() function with all tool registrations
+    - `agent/system_prompt.rs` (63 lines): system_prompt() method (byte-for-byte identical text)
+    - `agent/chat.rs` (139 lines): chat() and chat_inner() non-streaming methods
+    - `agent/streaming.rs` (291 lines): process_stream! macro + stream_chat() + stream_chat_inner()
+    - `agent/history.rs` (338 lines): build_history_with_time_markers(), sanitize_tool_history(), rig_message_to_db_messages(), db_message_to_rig_message()
+    - `agent/persistence.rs` (108 lines): load_recent_messages_from_db(), save_message_to_db(), update_tokens_used(), update_importance_score()
+  - **Key patterns**: pub(crate) for struct fields accessed by child modules, pub(super) for methods only needed by sibling submodules, impl blocks split across files
+  - All 234 tests pass, cargo clippy clean, cargo build clean
+
 - **Background Fact Extraction (Post-Phase 4)**:
   - **Problem**: `extract_and_store_facts()` ran synchronously after each chat/streaming response, blocking the return of `stream_chat()`/`chat()`. This caused the frontend typing cursor to stay visible and events like `canvas:open_program` to be delayed until the LLM fact extraction API call + embedding computation completed.
   - **Solution**: Replaced blocking `extract_and_store_facts()` with `spawn_fact_extraction()` using `tokio::spawn`:

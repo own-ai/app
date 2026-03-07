@@ -144,7 +144,7 @@ app/
 │
 ├── src-tauri/                    # Rust backend
 │   ├── src/
-│   │   ├── agent/                # OwnAIAgent (rig-core integration)
+│   │   ├── agent/                # OwnAIAgent (8 files: mod, providers, tools, system_prompt, chat, streaming, history, persistence)
 │   │   ├── ai_instances/         # Manager, models, keychain
 │   │   ├── commands/             # Tauri commands (chat, instances, memory, tools)
 │   │   ├── database/             # SQLite schema and migrations

@@ -103,6 +103,20 @@ Three stores:
 ### Backend Patterns
 
 #### Agent Architecture
+
+The `agent/` module is split into 8 files for maintainability:
+
+| File | Responsibility |
+|---|---|
+| `mod.rs` | `OwnAIAgent` struct, `new()`, accessors, summarization, fact extraction |
+| `providers.rs` | `AgentProvider`, `SummaryExtractorProvider`, `FactExtractorProvider` enums |
+| `tools.rs` | `create_tools()` - all tool registrations |
+| `system_prompt.rs` | System prompt generation |
+| `chat.rs` | Non-streaming chat (`chat`, `chat_inner`) |
+| `streaming.rs` | `process_stream!` macro, streaming chat |
+| `history.rs` | Chat history building, rig/DB message conversion, sanitization |
+| `persistence.rs` | DB load/save/update for messages |
+
 ```
 OwnAIAgent
 ├── model (rig-core Agent - Anthropic, OpenAI, or Ollama)
@@ -124,10 +138,10 @@ OwnAIAgent
 ```
 
 #### Tool Registration Pattern
-- Tools created in `create_tools()` helper function
+- Tools created in `create_tools()` helper function (in `agent/tools.rs`)
 - Passed to agent builder via `.tools()` method
 - Multi-turn tool calling enabled (MAX_TOOL_TURNS = 50)
-- Agent uses `process_stream!` macro for uniform streaming across all providers
+- Agent uses `process_stream!` macro (in `agent/streaming.rs`) for uniform streaming across all providers
 
 #### DbCache Pattern
 - `HashMap<String, Pool<Sqlite>>` wrapped in `Arc<Mutex<>>` (`DbCache` type alias)
