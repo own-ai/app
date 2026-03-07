@@ -65,7 +65,7 @@ impl LongTermMemory {
 
     /// Similarity threshold for deduplication.
     /// Entries with cosine similarity above this value are considered duplicates.
-    const DEDUP_SIMILARITY_THRESHOLD: f32 = 0.92;
+    const DEDUP_SIMILARITY_THRESHOLD: f32 = 0.85;
 
     /// Store a memory entry with its embedding.
     /// Performs semantic deduplication: if a very similar entry already exists
@@ -388,6 +388,10 @@ mod tests {
             .await
             .expect("Failed to create in-memory database");
 
+        crate::database::schema::run_migrations(&pool)
+            .await
+            .expect("Failed to run migrations");
+
         pool
     }
 
@@ -478,13 +482,16 @@ mod tests {
             .await
             .expect("Failed to create LongTermMemory");
 
-        // Store 5 facts
-        for i in 0..5 {
-            let entry = create_test_entry(
-                &format!("fact_{}", i),
-                &format!("Fact number {}", i),
-                MemoryType::Fact,
-            );
+        // Store 5 semantically distinct facts
+        let fact_contents = [
+            "User lives in Berlin",
+            "User works at a robotics company",
+            "User has a cat named Luna",
+            "User enjoys hiking in the Alps",
+            "User studied computer science at university",
+        ];
+        for (i, content) in fact_contents.iter().enumerate() {
+            let entry = create_test_entry(&format!("fact_{}", i), content, MemoryType::Fact);
             memory.store(entry).await.expect("Failed to store");
         }
 
@@ -508,13 +515,14 @@ mod tests {
         // Initially empty
         assert_eq!(memory.count().await.expect("Failed to count"), 0);
 
-        // Add entries
-        for i in 0..3 {
-            let entry = create_test_entry(
-                &format!("entry_{}", i),
-                &format!("Content {}", i),
-                MemoryType::Fact,
-            );
+        // Add semantically distinct entries
+        let contents = [
+            "User lives in Berlin",
+            "User prefers dark mode for all applications",
+            "User knows Rust programming language",
+        ];
+        for (i, content) in contents.iter().enumerate() {
+            let entry = create_test_entry(&format!("entry_{}", i), content, MemoryType::Fact);
             memory.store(entry).await.expect("Failed to store");
         }
 
