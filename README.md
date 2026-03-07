@@ -1,3 +1,14 @@
+## ⚠️ Repo moved
+
+This repository has been moved to Codeberg.
+
+The repository on GitHub is no longer being updated. Please use the new location:  
+👉 [https://codeberg.org/ownAI/ownAI](https://codeberg.org/ownAI/ownAI)
+
+Thank you for your support!
+
+---
+
 # ownAI
 
 A personal AI agent that evolves with you through continuous conversation and self-programming capabilities.
